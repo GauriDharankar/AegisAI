@@ -74,3 +74,21 @@ This repository currently contains the design and architecture phase of the proj
 - [ ] Policy Engine
 - [ ] Dashboard
 - [ ] Deployment
+
+## 🏗️ System Architecture
+
+### AI Decision Governance Workflow
+
+![Workflow](docs/workflow.jpeg)
+
+---
+
+### Platform Architecture
+
+![Platform Architecture](docs/system-architecture.jpeg)
+
+---
+
+### SaaS Architecture
+
+![SaaS Architecture](docs/saas-architecture.jpeg)
