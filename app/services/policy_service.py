@@ -1,190 +1,279 @@
+from typing import Any
+
+
 class PolicyService:
     """
-    Evaluates applicant data against tenant-defined lending policies.
+    Generic configurable policy evaluation engine.
+
+    Policies are supplied by the tenant and can originate from:
+    - Manual configuration
+    - Database
+    - NLP-extracted bank policy documents
     """
+
+    SUPPORTED_OPERATORS = {
+        ">",
+        ">=",
+        "<",
+        "<=",
+        "==",
+        "!="
+    }
 
     def check_compliance(
         self,
         features: dict,
-        policies: dict
+        policies: list
     ):
+
         checks = []
         violations = []
         errors = []
+        flags = []
 
-        # =========================================================
-        # 1. Minimum Credit Score
-        # =========================================================
+        for policy in policies:
 
-        if "minimum_credit_score" in policies:
+            # -------------------------------------------------
+            # Convert Pydantic model to dictionary if necessary
+            # -------------------------------------------------
 
-            required = policies["minimum_credit_score"]
-            actual = features.get("credit_score")
+            if hasattr(policy, "model_dump"):
+                policy = policy.model_dump()
+
+            # -------------------------------------------------
+            # Ignore disabled policies
+            # -------------------------------------------------
+
+            if not policy.get("enabled", True):
+                continue
+
+            policy_id = policy.get(
+                "policy_id",
+                "UNKNOWN"
+            )
+
+            name = policy.get(
+                "name",
+                policy_id
+            )
+
+            field = policy.get("field")
+
+            operator = policy.get("operator")
+
+            expected = policy.get("value")
+
+            action = policy.get(
+                "action",
+                "REVIEW"
+            )
+
+            severity = policy.get(
+                "severity",
+                "MEDIUM"
+            )
+
+            # -------------------------------------------------
+            # Validate policy definition
+            # -------------------------------------------------
+
+            if not field:
+
+                error = {
+                    "policy_id": policy_id,
+                    "policy": name,
+                    "status": "error",
+                    "message": "Policy field is missing."
+                }
+
+                checks.append(error)
+                errors.append(error)
+                continue
+
+            if operator not in self.SUPPORTED_OPERATORS:
+
+                error = {
+                    "policy_id": policy_id,
+                    "policy": name,
+                    "status": "error",
+                    "message": (
+                        f"Unsupported operator: {operator}"
+                    )
+                }
+
+                checks.append(error)
+                errors.append(error)
+                continue
+
+            # -------------------------------------------------
+            # Get applicant value
+            # -------------------------------------------------
+
+            actual = features.get(field)
 
             if actual is None:
-                check = {
-                    "rule": "minimum_credit_score",
-                    "actual": None,
-                    "required": required,
+
+                error = {
+                    "policy_id": policy_id,
+                    "policy": name,
+                    "field": field,
                     "status": "error",
-                    "message": "Credit score is missing."
+                    "message": (
+                        f"Required field '{field}' is missing."
+                    )
                 }
 
-                checks.append(check)
-                errors.append(check)
+                checks.append(error)
+                errors.append(error)
+                continue
 
-            else:
-                passed = actual >= required
+            # -------------------------------------------------
+            # Evaluate rule
+            # -------------------------------------------------
 
-                check = {
-                    "rule": "minimum_credit_score",
+            try:
+
+                passed = self._evaluate_condition(
+                    actual,
+                    operator,
+                    expected
+                )
+
+            except Exception as exc:
+
+                error = {
+                    "policy_id": policy_id,
+                    "policy": name,
+                    "field": field,
                     "actual": actual,
-                    "required": required,
-                    "status": "pass" if passed else "fail"
-                }
-
-                checks.append(check)
-
-                if not passed:
-                    violations.append(check)
-
-        # =========================================================
-        # 2. Minimum Income
-        # =========================================================
-
-        if "minimum_income" in policies:
-
-            required = policies["minimum_income"]
-            actual = features.get("income")
-
-            if actual is None:
-                check = {
-                    "rule": "minimum_income",
-                    "actual": None,
-                    "required": required,
+                    "expected": expected,
                     "status": "error",
-                    "message": "Income is missing."
+                    "message": str(exc)
                 }
 
-                checks.append(check)
-                errors.append(check)
+                checks.append(error)
+                errors.append(error)
+                continue
 
-            else:
-                passed = actual >= required
+            # -------------------------------------------------
+            # Create result
+            # -------------------------------------------------
 
-                check = {
-                    "rule": "minimum_income",
-                    "actual": actual,
-                    "required": required,
-                    "status": "pass" if passed else "fail"
-                }
+            check = {
+                "policy_id": policy_id,
+                "policy": name,
+                "field": field,
+                "operator": operator,
+                "actual": actual,
+                "expected": expected,
+                "action": action,
+                "severity": severity,
+                "status": "pass" if passed else "fail"
+            }
 
-                checks.append(check)
+            checks.append(check)
 
-                if not passed:
-                    violations.append(check)
+            # -------------------------------------------------
+            # Policy failed
+            # -------------------------------------------------
 
-        # =========================================================
-        # 3. Maximum Debt-to-Income Ratio
-        # =========================================================
+            if not passed:
 
-        if "maximum_debt_to_income" in policies:
+                violations.append(check)
 
-            maximum = policies["maximum_debt_to_income"]
-            actual = features.get("debt_to_income")
+                if action == "FLAG":
+                    flags.append(check)
 
-            if actual is None:
-                check = {
-                    "rule": "maximum_debt_to_income",
-                    "actual": None,
-                    "maximum": maximum,
-                    "status": "error",
-                    "message": "Debt-to-income ratio is missing."
-                }
-
-                checks.append(check)
-                errors.append(check)
-
-            else:
-                passed = actual <= maximum
-
-                check = {
-                    "rule": "maximum_debt_to_income",
-                    "actual": actual,
-                    "maximum": maximum,
-                    "status": "pass" if passed else "fail"
-                }
-
-                checks.append(check)
-
-                if not passed:
-                    violations.append(check)
-
-        # =========================================================
-        # 4. Maximum Loan Amount
-        # =========================================================
-
-        if "maximum_loan_amount" in policies:
-
-            maximum = policies["maximum_loan_amount"]
-            actual = features.get("loan_amount")
-
-            if actual is None:
-                check = {
-                    "rule": "maximum_loan_amount",
-                    "actual": None,
-                    "maximum": maximum,
-                    "status": "error",
-                    "message": "Loan amount is missing."
-                }
-
-                checks.append(check)
-                errors.append(check)
-
-            else:
-                passed = actual <= maximum
-
-                check = {
-                    "rule": "maximum_loan_amount",
-                    "actual": actual,
-                    "maximum": maximum,
-                    "status": "pass" if passed else "fail"
-                }
-
-                checks.append(check)
-
-                if not passed:
-                    violations.append(check)
-
-        # =========================================================
-        # Final Compliance Result
-        # =========================================================
+        # =====================================================
+        # FINAL RESULT
+        # =====================================================
 
         if errors:
+
             status = "error"
             passed = False
 
-        elif violations:
-            status = "violation"
-            passed = False
-
         else:
-            status = "compliant"
-            passed = True
+
+            blocking_violations = [
+                violation
+                for violation in violations
+                if violation.get("action") in {"REJECT", "REVIEW"}
+            ]
+
+            if blocking_violations:
+
+                status = "violation"
+                passed = False
+
+            elif violations:
+
+                status = "flagged"
+                passed = True
+
+            else:
+
+                status = "compliant"
+                passed = True
 
         return {
+
             "status": status,
+
             "passed": passed,
+
             "total_checks": len(checks),
+
             "passed_checks": sum(
-                1 for check in checks
+                1
+                for check in checks
                 if check["status"] == "pass"
             ),
+
             "failed_checks": sum(
-                1 for check in checks
+                1
+                for check in checks
                 if check["status"] == "fail"
             ),
+
             "checks": checks,
+
             "violations": violations,
+
+            "flags": flags,
+
             "errors": errors
         }
+
+    # =========================================================
+    # CONDITION EVALUATOR
+    # =========================================================
+
+    @staticmethod
+    def _evaluate_condition(
+        actual: Any,
+        operator: str,
+        expected: Any
+    ) -> bool:
+
+        if operator == ">":
+            return actual > expected
+
+        if operator == ">=":
+            return actual >= expected
+
+        if operator == "<":
+            return actual < expected
+
+        if operator == "<=":
+            return actual <= expected
+
+        if operator == "==":
+            return actual == expected
+
+        if operator == "!=":
+            return actual != expected
+
+        raise ValueError(
+            f"Unsupported operator: {operator}"
+        )

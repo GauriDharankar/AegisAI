@@ -40,32 +40,38 @@ def evaluate_governance(
         # -------------------------------------------------
 
         fairness_data={
-            "predictions": request.fairness.predictions,
+            "predictions":
+                request.fairness.predictions,
 
             "protected_groups":
                 request.fairness.protected_groups,
 
-            "threshold":
-                request.fairness.threshold
+            "config":
+                request.fairness.config.model_dump()
         },
 
         # -------------------------------------------------
         # Tenant Policies
         # -------------------------------------------------
 
-        policies=request.policies,
+        policies=[
+            policy.model_dump()
+            for policy in request.policies
+        ],
 
         # -------------------------------------------------
         # Tenant Configuration
         # -------------------------------------------------
 
         configuration={
+            "fairness":
+                request.configuration.fairness.model_dump(),
 
-            "auto_approve_enabled":
-                request.auto_approve.enabled,
+            "risk":
+                request.configuration.risk.model_dump(),
 
-            "auto_approve_probability":
-                request.auto_approve.minimum_probability
+            "auto_approve":
+                request.configuration.auto_approve.model_dump()
         }
     )
 

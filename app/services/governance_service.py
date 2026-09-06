@@ -11,7 +11,7 @@ from app.services.risk_service import RiskService
 
 class GovernanceService:
     """
-    Orchestrates the complete AegisAI governance workflow.
+    Central AegisAI AI Governance Engine.
 
     Workflow:
 
@@ -19,35 +19,20 @@ class GovernanceService:
               ↓
         SHAP Explainability
               ↓
-        Fairness & Bias Analysis
+        Fairness Analysis
               ↓
         Policy Compliance
               ↓
-        Governance Risk Assessment
+        Risk Assessment
               ↓
-        Intelligent Decision Routing
+        Intelligent Routing
               ↓
         Final Governance Decision
     """
 
     def __init__(self):
 
-        # =====================================================
-        # Demo ML Model
-        # =====================================================
-        #
-        # In the final integrated system, the bank's existing
-        # ML model provides the prediction to AegisAI.
-        #
-        # The local model is currently used for development
-        # and SHAP demonstration.
-        # =====================================================
-
         self.model = loan_model
-
-        # =====================================================
-        # Governance Components
-        # =====================================================
 
         self.shap_service = SHAPService(
             self.model.get_model()
@@ -62,7 +47,7 @@ class GovernanceService:
         self.risk_service = RiskService()
 
     # =========================================================
-    # Main Governance Workflow
+    # MAIN GOVERNANCE WORKFLOW
     # =========================================================
 
     def evaluate(
@@ -71,55 +56,114 @@ class GovernanceService:
         features: dict,
         prediction: dict,
         fairness_data: dict,
-        policies: dict,
+        policies: list,
         configuration: dict
     ):
-
-        # =====================================================
-        # 1. Generate Governance ID
-        # =====================================================
 
         governance_id = (
             f"GOV-{uuid.uuid4().hex[:12].upper()}"
         )
 
-        # =====================================================
-        # 2. Generate Timestamp
-        # =====================================================
-
         timestamp = datetime.now(
             timezone.utc
         ).isoformat()
 
+        decision_trace = []
+
         # =====================================================
-        # 3. SHAP Explainability
+        # 1. MODEL
+        # =====================================================
+
+        decision_trace.append({
+            "stage": "MODEL",
+            "status": "completed",
+            "result": prediction.get("label"),
+            "probability": prediction.get(
+                "probability"
+            )
+        })
+
+        # =====================================================
+        # 2. SHAP
         # =====================================================
 
         explanation = self.shap_service.explain(
             features
         )
 
+        decision_trace.append({
+            "stage": "SHAP",
+            "status": "completed",
+            "result": "explained"
+        })
+
         # =====================================================
-        # 4. Fairness & Bias Analysis
+        # 3. FAIRNESS
         # =====================================================
 
-        fairness_result = (
-            self.fairness_service.demographic_parity(
-                predictions=fairness_data["predictions"],
-
-                protected_groups=fairness_data[
-                    "protected_groups"
-                ],
-
-                threshold=fairness_data.get(
-                    "threshold",
-                    0.10
-                )
-            )
+        fairness_config = fairness_data.get(
+            "config",
+            {}
         )
 
+        fairness_enabled = fairness_config.get(
+            "enabled",
+            True
+        )
+
+        if fairness_enabled:
+
+            fairness_result = (
+                self.fairness_service.demographic_parity(
+                    predictions=fairness_data.get(
+                        "predictions",
+                        []
+                    ),
+                    protected_groups=fairness_data.get(
+                        "protected_groups",
+                        []
+                    ),
+                    threshold=fairness_config.get(
+                        "threshold",
+                        0.10
+                    ),
+                    minimum_group_size=fairness_config.get(
+                        "minimum_group_size",
+                        1
+                    )
+                )
+            )
+
+        else:
+
+            fairness_result = {
+                "status": "disabled",
+                "metric": "demographic_parity",
+                "passed": True,
+                "message": (
+                    "Fairness analysis is disabled "
+                    "for this tenant."
+                )
+            }
+
+        decision_trace.append({
+            "stage": "FAIRNESS",
+            "status": fairness_result.get(
+                "status"
+            ),
+            "result": (
+                "pass"
+                if fairness_result.get(
+                    "passed"
+                )
+                else fairness_result.get(
+                    "status"
+                )
+            )
+        })
+
         # =====================================================
-        # 5. Policy Compliance
+        # 4. POLICY
         # =====================================================
 
         policy_result = (
@@ -129,20 +173,55 @@ class GovernanceService:
             )
         )
 
+        decision_trace.append({
+            "stage": "POLICY",
+            "status": policy_result.get(
+                "status"
+            ),
+            "result": (
+                "pass"
+                if policy_result.get(
+                    "passed"
+                )
+                else policy_result.get(
+                    "status"
+                )
+            )
+        })
+
         # =====================================================
-        # 6. Governance Risk Assessment
+        # 5. RISK
         # =====================================================
+
+        risk_config = configuration.get(
+            "risk",
+            {}
+        )
 
         risk_level = (
             self.risk_service.calculate_risk(
                 prediction=prediction,
                 fairness_result=fairness_result,
-                policy_result=policy_result
+                policy_result=policy_result,
+                low_probability=risk_config.get(
+                    "low_probability",
+                    0.85
+                ),
+                medium_probability=risk_config.get(
+                    "medium_probability",
+                    0.65
+                )
             )
         )
 
+        decision_trace.append({
+            "stage": "RISK",
+            "status": "completed",
+            "result": risk_level
+        })
+
         # =====================================================
-        # 7. Intelligent Decision Routing
+        # 6. ROUTING
         # =====================================================
 
         routing_result = (
@@ -150,19 +229,35 @@ class GovernanceService:
                 prediction=prediction,
                 fairness_result=fairness_result,
                 policy_result=policy_result,
+                risk_level=risk_level,
                 configuration=configuration
             )
         )
 
+        decision_trace.append({
+            "stage": "ROUTING",
+            "status": "completed",
+            "result": routing_result[
+                "route"
+            ],
+            "reason_code": routing_result.get(
+                "reason_code"
+            )
+        })
+
         # =====================================================
-        # 8. Determine Overall Governance Status
+        # 7. FINAL STATUS
         # =====================================================
 
-        if routing_result["route"] == "AUTO_APPROVE":
+        route = routing_result[
+            "route"
+        ]
+
+        if route == "AUTO_APPROVE":
 
             governance_status = "approved"
 
-        elif routing_result["route"] == "HUMAN_REVIEW":
+        elif route == "HUMAN_REVIEW":
 
             governance_status = "review_required"
 
@@ -170,15 +265,17 @@ class GovernanceService:
 
             governance_status = "rejected"
 
+        decision_trace.append({
+            "stage": "FINAL",
+            "status": governance_status,
+            "result": route
+        })
+
         # =====================================================
-        # 9. Final Governance Response
+        # 8. FINAL RESPONSE
         # =====================================================
 
         return {
-
-            # -------------------------------------------------
-            # Tenant & Audit Information
-            # -------------------------------------------------
 
             "tenant_id": tenant_id,
 
@@ -186,23 +283,12 @@ class GovernanceService:
 
             "timestamp": timestamp,
 
-            # -------------------------------------------------
-            # Overall Governance Result
-            # -------------------------------------------------
-
-            "governance_status": governance_status,
-
-            # -------------------------------------------------
-            # Governance Risk
-            # -------------------------------------------------
+            "governance_status":
+                governance_status,
 
             "risk": {
                 "level": risk_level
             },
-
-            # -------------------------------------------------
-            # Decision Information
-            # -------------------------------------------------
 
             "decision": {
 
@@ -213,37 +299,34 @@ class GovernanceService:
                     prediction["probability"],
 
                 "final_decision":
-                    routing_result["route"]
+                    route,
+
+                "reason_code":
+                    routing_result.get(
+                        "reason_code"
+                    ),
+
+                "reason":
+                    routing_result.get(
+                        "reason"
+                    )
             },
 
-            # -------------------------------------------------
-            # SHAP Explainability
-            # -------------------------------------------------
+            "explainability":
+                explanation,
 
-            "explainability": explanation,
+            "fairness":
+                fairness_result,
 
-            # -------------------------------------------------
-            # Fairness & Bias
-            # -------------------------------------------------
+            "policy_compliance":
+                policy_result,
 
-            "fairness": fairness_result,
+            "routing":
+                routing_result,
 
-            # -------------------------------------------------
-            # Policy Compliance
-            # -------------------------------------------------
-
-            "policy_compliance": policy_result,
-
-            # -------------------------------------------------
-            # Intelligent Routing
-            # -------------------------------------------------
-
-            "routing": routing_result
+            "decision_trace":
+                decision_trace
         }
 
-
-# =============================================================
-# Shared Governance Service Instance
-# =============================================================
 
 governance_service = GovernanceService()
