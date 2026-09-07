@@ -73,7 +73,7 @@ export default function ApplicationReview() {
             </span>
 
             <span className="rounded-full bg-yellow-100 px-4 py-2 text-sm font-medium text-yellow-700">
-              {application.confidence}% confidence
+              {application.probability}% confidence
             </span>
           </div>
         </div>
@@ -118,9 +118,29 @@ export default function ApplicationReview() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ExplanationCard />
-        <FairnessCard />
+          <ExplanationCard />
+          <FairnessCard
+    enabled={true}
+    metric="Demographic Parity"
+    threshold={0.10}
+    disparity={0.042}
+    minimumGroupSize={2}
+    passed={true}
+    groups={[
+      {
+        group: "Group A",
+        approvalRate: 0.962,
+        sampleSize: 50,
+      },
+      {
+        group: "Group B",
+        approvalRate: 0.920,
+        sampleSize: 48,
+      },
+    ]}
+  />
       </div>
+      
 
       <PolicyViolationCard />
 

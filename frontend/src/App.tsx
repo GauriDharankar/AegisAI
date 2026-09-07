@@ -14,6 +14,11 @@ import ApplicationReview from "./pages/ApplicationReview";
 import BiasAlerts from "./pages/BiasAlerts";
 import Reminders from "./pages/Reminders";
 import Notifications from "./pages/Notifications";
+import GovernanceAnalysis from "./pages/GovernanceAnalysis";
+import Policies from "./pages/Policies";
+import FairnessBias from "./pages/FairnessBias";
+import Configuration from "./pages/Configuration";
+import AuditTrail from "./pages/AuditTrail";
 
 function App() {
   return (
@@ -51,12 +56,37 @@ function App() {
             path="/notifications"
             element={<Notifications />}
           />
-        </Route>
+          </Route>
 
-        <Route
+          <Route
+            path="/reviews/:id"
+            element={<GovernanceAnalysis />}
+          />
+
+          <Route
+            path="/policies"
+            element={<Policies />}
+          />
+
+          <Route
+            path="/fairness"
+            element={<FairnessBias />}
+          />
+
+          <Route
+            path="/configuration"
+            element={<Configuration />}
+          />
+
+          <Route
+            path="/audit"
+            element={<AuditTrail />}
+          />
+
+          <Route
           path="/"
           element={<Navigate to="/dashboard" replace />}
-        />
+          />
       </Routes>
     </BrowserRouter>
   );

@@ -5,10 +5,10 @@ export default function Topbar() {
     <header className="flex h-20 items-center justify-between border-b bg-white px-8">
       <div>
         <h2 className="text-xl font-semibold text-slate-800">
-          Human Review Center
+          AI Decision Governance
         </h2>
         <p className="text-sm text-slate-500">
-          Monitor and review AI-assisted lending decisions
+          Explainable, fair and policy-compliant lending decisions
         </p>
       </div>
 

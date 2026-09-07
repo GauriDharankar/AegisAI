@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { applications } from "../data/mockData";
@@ -67,10 +67,10 @@ export default function ReviewQueue() {
             <thead className="bg-slate-50">
               <tr className="text-left text-sm text-slate-500">
                 <th className="px-6 py-4">Application</th>
-                <th className="px-6 py-4">Applicant</th>
-                <th className="px-6 py-4">AI Decision</th>
+                <th className="px-6 py-4">AI Prediction</th>
                 <th className="px-6 py-4">Confidence</th>
                 <th className="px-6 py-4">Risk</th>
+                <th className="px-6 py-4">Governance Trigger</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Action</th>
               </tr>
@@ -95,7 +95,7 @@ export default function ReviewQueue() {
                   </td>
 
                   <td className="px-6 py-4">
-                    {application.confidence}%
+                    {application.probability}%
                   </td>
 
                   <td className="px-6 py-4">
@@ -109,16 +109,19 @@ export default function ReviewQueue() {
                   </td>
 
                   <td className="px-6 py-4">
+                    <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">
+                       LOW_CONFIDENCE
+                    </span>
+                  </td>
+
+                  <td className="px-6 py-4">
                     <button
-                      onClick={() =>
-                        navigate(
-                          `/reviews/${application.id}`
-                        )
+                        onClick={() =>
+                        navigate(`/reviews/${application.id}`)
                       }
-                      className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                     >
-                      <Eye size={16} />
-                      Review
+                      Analyze Decision
                     </button>
                   </td>
                 </tr>

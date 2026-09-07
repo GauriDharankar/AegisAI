@@ -1,74 +1,138 @@
-import { fairnessReport } from "../data/mockData";
+import { CheckCircle2, AlertTriangle } from "lucide-react";
 
-export default function FairnessCard() {
+interface Group {
+  group: string;
+  approvalRate: number;
+  sampleSize: number;
+}
+
+interface Props {
+  enabled: boolean;
+  metric: string;
+  threshold: number;
+  disparity: number;
+  minimumGroupSize: number;
+  passed: boolean;
+  groups: Group[];
+}
+
+export default function FairnessCard({
+  enabled,
+  metric,
+  threshold,
+  disparity,
+  minimumGroupSize,
+  passed,
+  groups,
+}: Props) {
   return (
     <div className="rounded-xl border bg-white p-6">
-      <h2 className="text-lg font-semibold">
-        Fairness Report
-      </h2>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">
+            Fairness Analysis
+          </h2>
 
-      <p className="mb-5 mt-1 text-sm text-slate-500">
-        Model fairness metrics for protected attributes.
-      </p>
+          <p className="mt-1 text-sm text-slate-500">
+            Demographic fairness evaluation
+          </p>
+        </div>
 
-      <div className="space-y-4">
-        {fairnessReport.map((report) => (
-          <div
-            key={report.protectedAttribute}
-            className="rounded-lg border p-4"
-          >
-            <div className="mb-3 flex justify-between">
-              <h3 className="font-medium">
-                {report.protectedAttribute}
-              </h3>
+        {passed ? (
+          <div className="flex items-center gap-2 rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
+            <CheckCircle2 size={16} />
+            PASSED
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
+            <AlertTriangle size={16} />
+            FAILED
+          </div>
+        )}
+      </div>
 
-              <span
-                className={`rounded-full px-3 py-1 text-xs ${
-                  report.status === "PASS"
-                    ? "bg-green-100 text-green-700"
-                    : report.status === "WARNING"
-                    ? "bg-yellow-100 text-yellow-700"
-                    : "bg-red-100 text-red-700"
+      {!enabled ? (
+        <div className="mt-6 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+          Fairness analysis is disabled for this tenant.
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg bg-slate-50 p-4">
+              <p className="text-xs text-slate-500">
+                Metric
+              </p>
+
+              <p className="mt-1 font-semibold">
+                {metric}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 p-4">
+              <p className="text-xs text-slate-500">
+                Threshold
+              </p>
+
+              <p className="mt-1 font-semibold">
+                {(threshold * 100).toFixed(1)}%
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 p-4">
+              <p className="text-xs text-slate-500">
+                Calculated Difference
+              </p>
+
+              <p
+                className={`mt-1 font-semibold ${
+                  passed
+                    ? "text-green-600"
+                    : "text-red-600"
                 }`}
               >
-                {report.status}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">
-                  Demographic Parity
-                </p>
-
-                <p className="mt-1 font-semibold">
-                  {report.demographicParity}
-                </p>
-              </div>
-
-              <div className="rounded bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">
-                  Equal Opportunity
-                </p>
-
-                <p className="mt-1 font-semibold">
-                  {report.equalOpportunity}
-                </p>
-              </div>
-
-              <div className="rounded bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">
-                  Disparate Impact
-                </p>
-
-                <p className="mt-1 font-semibold">
-                  {report.disparateImpact}
-                </p>
-              </div>
+                {(disparity * 100).toFixed(1)}%
+              </p>
             </div>
           </div>
-        ))}
-      </div>
+
+          <div className="mt-6">
+            <h3 className="mb-3 font-medium">
+              Group Approval Rates
+            </h3>
+
+            <div className="space-y-4">
+              {groups.map((group) => (
+                <div key={group.group}>
+                  <div className="mb-2 flex justify-between text-sm">
+                    <span>{group.group}</span>
+
+                    <span className="font-semibold">
+                      {(group.approvalRate * 100).toFixed(1)}%
+                    </span>
+                  </div>
+
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-blue-500"
+                      style={{
+                        width: `${group.approvalRate * 100}%`,
+                      }}
+                    />
+                  </div>
+
+                  <p className="mt-1 text-xs text-slate-400">
+                    Sample size: {group.sampleSize}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5 text-xs text-slate-500">
+            Minimum group size: {minimumGroupSize}
+          </div>
+        </>
+      )}
     </div>
   );
 }
