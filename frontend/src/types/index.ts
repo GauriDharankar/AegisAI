@@ -1,7 +1,4 @@
-export type FinalDecision =
-  | "AUTO_APPROVE"
-  | "HUMAN_REVIEW"
-  | "REJECT";
+export type FinalDecision = "APPROVE" | "REJECT" | "REVIEW";
 
 export type RiskLevel =
   | "LOW"
@@ -17,7 +14,7 @@ export type GovernanceStage =
   | "ROUTING"
   | "FINAL";
 
-export interface LoanApplication {
+export type LoanApplication = {
   id: string;
   applicantId: string;
   applicantName: string;

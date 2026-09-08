@@ -1,11 +1,48 @@
 import type {
   LoanApplication,
-  Explanation,
-  FairnessReport,
-  PolicyViolation,
-  BiasAlert,
-  Notification,
 } from "../types";
+
+type Explanation = {
+  feature: string;
+  value: string;
+  impact: number;
+  direction: "POSITIVE" | "NEGATIVE";
+};
+
+type FairnessReport = {
+  protectedAttribute: string;
+  demographicParity: number;
+  equalOpportunity: number;
+  disparateImpact: number;
+  status: "PASS" | "WARNING";
+};
+
+type PolicyViolation = {
+  id: string;
+  policy: string;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  description: string;
+};
+
+type BiasAlert = {
+  id: string;
+  title: string;
+  description: string;
+  overrideRate: number;
+  threshold: number;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  createdAt: string;
+  status: "OPEN" | "CLOSED";
+};
+
+type Notification = {
+  id: string;
+  title: string;
+  message: string;
+  type: "REVIEW" | "BIAS" | "REMINDER";
+  read: boolean;
+  createdAt: string;
+};
 
 export const applications: LoanApplication[] = [
   {
@@ -16,7 +53,8 @@ export const applications: LoanApplication[] = [
     creditScore: 742,
     income: 850000,
     aiDecision: "APPROVE",
-    confidence: 94,
+    finalDecision: "APPROVE",
+    probability: 0.87,
     status: "PENDING",
     riskLevel: "LOW",
     submittedAt: "2026-08-16 09:30",
@@ -29,7 +67,8 @@ export const applications: LoanApplication[] = [
     creditScore: 681,
     income: 620000,
     aiDecision: "REVIEW",
-    confidence: 72,
+    finalDecision: "APPROVE",
+    probability: 0.64,
     status: "PENDING",
     riskLevel: "MEDIUM",
     submittedAt: "2026-08-16 08:45",
@@ -42,7 +81,8 @@ export const applications: LoanApplication[] = [
     creditScore: 598,
     income: 450000,
     aiDecision: "REJECT",
-    confidence: 91,
+    finalDecision: "REJECT",
+    probability: 0.38,
     status: "PENDING",
     riskLevel: "HIGH",
     submittedAt: "2026-08-16 08:10",
@@ -55,7 +95,8 @@ export const applications: LoanApplication[] = [
     creditScore: 781,
     income: 920000,
     aiDecision: "APPROVE",
-    confidence: 97,
+    finalDecision: "APPROVE",
+    probability: 0.92,
     status: "APPROVED",
     riskLevel: "LOW",
     submittedAt: "2026-08-15 17:20",

@@ -1,5 +1,5 @@
 import api from "./api";
-import LoanApplication from "../types";
+import type { LoanApplication } from "../types";
 
 export const reviewService = {
   async getPendingReviews(): Promise<LoanApplication[]> {
