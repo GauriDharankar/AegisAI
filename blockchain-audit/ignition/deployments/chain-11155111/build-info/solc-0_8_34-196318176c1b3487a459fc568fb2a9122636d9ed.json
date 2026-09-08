@@ -1,0 +1,49 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_34-196318176c1b3487a459fc568fb2a9122636d9ed",
+  "solcVersion": "0.8.34",
+  "solcLongVersion": "0.8.34+commit.80d5c536",
+  "compilerType": "solc",
+  "toolVersions": {
+    "hardhat": "3.15.0"
+  },
+  "userSourceNameMap": {
+    "contracts/AuditRegistry.sol": "project/contracts/AuditRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "osaka",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/AuditRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.34;\r\n\r\ncontract AuditRegistry {\r\n\r\n    // Wallet that deployed the contract\r\n    address public owner;\r\n\r\n    struct AuditRecord {\r\n        bytes32 auditHash;\r\n        uint256 timestamp;\r\n        address recordedBy;\r\n    }\r\n\r\n    // One application can have MANY audit records\r\n    mapping(string => AuditRecord[]) private auditRecords;\r\n\r\n    event AuditRecorded(\r\n        string applicationId,\r\n        uint256 auditIndex,\r\n        bytes32 auditHash,\r\n        uint256 timestamp,\r\n        address recordedBy\r\n    );\r\n\r\n    modifier onlyOwner() {\r\n        require(\r\n            msg.sender == owner,\r\n            \"Not authorized\"\r\n        );\r\n        _;\r\n    }\r\n\r\n    constructor() {\r\n        owner = msg.sender;\r\n    }\r\n\r\n    // -----------------------------------------\r\n    // Record a NEW audit\r\n    // -----------------------------------------\r\n    function recordAudit(\r\n        string memory applicationId,\r\n        bytes32 auditHash\r\n    )\r\n        public\r\n        onlyOwner\r\n    {\r\n        auditRecords[applicationId].push(\r\n            AuditRecord({\r\n                auditHash: auditHash,\r\n                timestamp: block.timestamp,\r\n                recordedBy: msg.sender\r\n            })\r\n        );\r\n\r\n        uint256 auditIndex =\r\n            auditRecords[applicationId].length - 1;\r\n\r\n        emit AuditRecorded(\r\n            applicationId,\r\n            auditIndex,\r\n            auditHash,\r\n            block.timestamp,\r\n            msg.sender\r\n        );\r\n    }\r\n\r\n    // -----------------------------------------\r\n    // Get number of audits for application\r\n    // -----------------------------------------\r\n    function getAuditCount(\r\n        string memory applicationId\r\n    )\r\n        public\r\n        view\r\n        returns (uint256)\r\n    {\r\n        return auditRecords[applicationId].length;\r\n    }\r\n\r\n    // -----------------------------------------\r\n    // Get specific audit\r\n    // -----------------------------------------\r\n    function getAudit(\r\n        string memory applicationId,\r\n        uint256 auditIndex\r\n    )\r\n        public\r\n        view\r\n        returns (\r\n            bytes32 auditHash,\r\n            uint256 timestamp,\r\n            address recordedBy\r\n        )\r\n    {\r\n        require(\r\n            auditIndex < auditRecords[applicationId].length,\r\n            \"Invalid audit index\"\r\n        );\r\n\r\n        AuditRecord memory record =\r\n            auditRecords[applicationId][auditIndex];\r\n\r\n        return (\r\n            record.auditHash,\r\n            record.timestamp,\r\n            record.recordedBy\r\n        );\r\n    }\r\n}"
+      }
+    }
+  }
+}

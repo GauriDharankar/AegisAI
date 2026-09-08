@@ -1,0 +1,22 @@
+[
+  {
+    "application_id": "APP1005",
+    "ai_decision": "APPROVED",
+    "ai_score": 0.78,
+    "human_review": false,
+    "final_decision": "APPROVED",
+    "model_version": "V1",
+    "audit_hash": "0x52f562e2cb91af2d9964b0b747b9ae6c3dab0d55b3c138891a11468ec4f7958a",
+    "recorded_at": "2026-09-07T16:51:36.097Z"
+  },
+  {
+    "application_id": "APP1005",
+    "ai_decision": "APPROVED",
+    "ai_score": 0.98,
+    "human_review": true,
+    "final_decision": "APPROVED",
+    "model_version": "V1",
+    "audit_hash": "0x67f3c1d5a47beaa6023565e727e9333df984f83e00284ca757d237f2d2ada2ad",
+    "recorded_at": "2026-09-07T16:52:16.529Z"
+  }
+]
