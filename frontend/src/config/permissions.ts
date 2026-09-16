@@ -1,0 +1,42 @@
+import type { UserRole } from "../types/auth";
+
+export const rolePermissions: Record<
+  UserRole,
+  string[]
+> = {
+  OPERATIONS: [
+    "VIEW_LOW_RISK",
+    "REVIEW_APPLICATION",
+  ],
+
+  RISK_OFFICER: [
+    "VIEW_LOW_RISK",
+    "VIEW_BORDERLINE",
+    "VIEW_HIGH_RISK",
+    "REVIEW_APPLICATION",
+    "VIEW_FAIRNESS",
+    "VIEW_POLICY_VIOLATIONS",
+    "OVERRIDE_DECISION",
+  ],
+
+  CREDIT_COMMITTEE: [
+    "VIEW_HIGH_LOAN_AMOUNT",
+    "REVIEW_APPLICATION",
+    "VIEW_RISK_REPORT",
+    "VIEW_POLICY_VIOLATIONS",
+    "OVERRIDE_DECISION",
+    "VIEW_AUDIT",
+  ],
+
+  MANAGER: [
+    "VIEW_ALL",
+    "REVIEW_APPLICATION",
+    "VIEW_FAIRNESS",
+    "VIEW_POLICY_VIOLATIONS",
+    "OVERRIDE_DECISION",
+    "MANAGE_POLICIES",
+    "MANAGE_CONFIGURATION",
+    "VIEW_AUDIT",
+    "MANAGE_USERS",
+  ],
+};

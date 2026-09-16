@@ -8,6 +8,8 @@ import {
 import DashboardLayout from "./layouts/DashboardLayout";
 
 import Login from "./pages/Login";
+import Unauthorized from "./pages/Unauthorized";
+
 import Dashboard from "./pages/Dashboard";
 import ReviewQueue from "./pages/ReviewQueue";
 import ApplicationReview from "./pages/ApplicationReview";
@@ -20,77 +22,217 @@ import FairnessBias from "./pages/FairnessBias";
 import Configuration from "./pages/Configuration";
 import AuditTrail from "./pages/AuditTrail";
 
+import ProtectedRoute from "./components/ProtectedRoute";
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+
+        {/* =========================
+            PUBLIC ROUTES
+        ========================== */}
+
         <Route path="/login" element={<Login />} />
 
-        <Route element={<DashboardLayout />}>
+        <Route
+          path="/unauthorized"
+          element={<Unauthorized />}
+        />
+
+
+        {/* =========================
+            PROTECTED APPLICATION
+        ========================== */}
+
+        <Route
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+
+          {/* Dashboard */}
           <Route
-            path="/dashboard"
+            path="dashboard"
             element={<Dashboard />}
           />
 
+
+          {/* Decision Queue */}
           <Route
-            path="/reviews"
-            element={<ReviewQueue />}
+            path="reviews"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "OPERATIONS",
+                  "RISK_OFFICER",
+                  "CREDIT_COMMITTEE",
+                  "MANAGER",
+                ]}
+              >
+                <ReviewQueue />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Individual Application Review */}
           <Route
-            path="/reviews/:id"
-            element={<ApplicationReview />}
+            path="reviews/:id"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "OPERATIONS",
+                  "RISK_OFFICER",
+                  "CREDIT_COMMITTEE",
+                  "MANAGER",
+                ]}
+              >
+                <ApplicationReview />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Governance Analysis */}
           <Route
-            path="/alerts"
-            element={<BiasAlerts />}
+            path="governance/:id"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "RISK_OFFICER",
+                  "CREDIT_COMMITTEE",
+                  "MANAGER",
+                ]}
+              >
+                <GovernanceAnalysis />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Bias Alerts */}
           <Route
-            path="/reminders"
+            path="alerts"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "RISK_OFFICER",
+                  "MANAGER",
+                ]}
+              >
+                <BiasAlerts />
+              </ProtectedRoute>
+            }
+          />
+
+
+          {/* Reminders */}
+          <Route
+            path="reminders"
             element={<Reminders />}
           />
 
+
+          {/* Notifications */}
           <Route
-            path="/notifications"
+            path="notifications"
             element={<Notifications />}
           />
-          </Route>
 
+
+          {/* Policies */}
           <Route
-            path="/reviews/:id"
-            element={<GovernanceAnalysis />}
+            path="policies"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "RISK_OFFICER",
+                  "MANAGER",
+                ]}
+              >
+                <Policies />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Fairness & Bias */}
           <Route
-            path="/policies"
-            element={<Policies />}
+            path="fairness"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "RISK_OFFICER",
+                  "MANAGER",
+                ]}
+              >
+                <FairnessBias />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Audit Trail */}
           <Route
-            path="/fairness"
-            element={<FairnessBias />}
+            path="audit"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "CREDIT_COMMITTEE",
+                  "MANAGER",
+                ]}
+              >
+                <AuditTrail />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* Configuration */}
           <Route
-            path="/configuration"
-            element={<Configuration />}
+            path="configuration"
+            element={
+              <ProtectedRoute
+                allowedRoles={["MANAGER"]}
+              >
+                <Configuration />
+              </ProtectedRoute>
+            }
           />
 
-          <Route
-            path="/audit"
-            element={<AuditTrail />}
-          />
+        </Route>
 
-          <Route
+
+        {/* =========================
+            DEFAULT ROUTES
+        ========================== */}
+
+        <Route
           path="/"
-          element={<Navigate to="/dashboard" replace />}
-          />
+          element={
+            <Navigate
+              to="/dashboard"
+              replace
+            />
+          }
+        />
+
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to="/dashboard"
+              replace
+            />
+          }
+        />
+
       </Routes>
     </BrowserRouter>
   );
 }
 
 export default App;
-
