@@ -19,11 +19,10 @@ BLOCKCHAIN_AUDIT_URL = os.getenv(
     "http://localhost:3000/api/audit"
 )
 
-
 @router.post("/evaluate")
 async def evaluate_governance(request: GovernanceRequest):
 
-    # 1. Evaluate governance using your existing engine
+    # 1. Evaluate governance using the existing engine
     result = governance_service.evaluate(
         tenant_id=request.tenant_id,
         features=request.features,
@@ -51,83 +50,113 @@ async def evaluate_governance(request: GovernanceRequest):
 
     result_data = jsonable_encoder(result)
 
-    # 2. Extract the final decision from the governance result.
-    # Confirm the key names against your actual service response.
+    # 2. Extract final decision
     final_decision = "UNMAPPED"
 
     if isinstance(result_data, dict):
+
+        decision_obj = result_data.get("decision", {})
+
         final_decision = (
             result_data.get("final_decision")
-            or result_data.get("decision")
+            or (
+                decision_obj.get("final_decision")
+                if isinstance(decision_obj, dict)
+                else None
+            )
             or result_data.get("governance_decision")
             or "UNMAPPED"
         )
 
     final_decision = str(final_decision).upper()
 
-    # 3. Prepare the audit record.
-    # Avoid sending raw applicant features or unnecessary PII.
+    # 3. Prepare audit record
     audit_payload = {
         "application_id": request.application_id,
         "tenant_id": request.tenant_id,
         "event_type": "GOVERNANCE_EVALUATION",
+
         "ai_decision": request.prediction.label.upper(),
         "ai_score": request.prediction.probability,
+
         "human_review": final_decision in {
             "REVIEW",
             "ESCALATE",
-            "MANUAL_REVIEW"
+            "MANUAL_REVIEW",
+            "HUMAN_REVIEW"
         },
+
         "final_decision": final_decision,
+
         "governance_result": result_data
     }
 
-    # 4. Submit the audit record to the Node.js service.
+    # 4. Submit audit to blockchain service
     try:
+
         async with httpx.AsyncClient(timeout=15.0) as client:
+
             response = await client.post(
                 BLOCKCHAIN_AUDIT_URL,
                 json=audit_payload
             )
 
-            response.raise_for_status()
-            audit_result = response.json()
+        print("\n========== BLOCKCHAIN RESPONSE ==========")
+        print("Status:", response.status_code)
+        print("Body:", response.text)
+        print("=========================================\n")
 
-            if not audit_result.get("success"):
-                raise HTTPException(
-                    status_code=502,
-                    detail="Blockchain audit service rejected the record"
-                )
+        response.raise_for_status()
 
-    except HTTPException:
-        raise
+        blockchain_receipt = response.json()
 
-    except httpx.HTTPError as exc:
+    except Exception as e:
+
+        print("\n========== BLOCKCHAIN ERROR ==========")
+        print("Error type:", type(e).__name__)
+        print("Error:", repr(e))
+        print("======================================\n")
+
         raise HTTPException(
             status_code=502,
             detail={
                 "message": (
-                    "Governance evaluation completed, but blockchain "
-                    "audit submission failed"
+                    "Governance evaluation completed, "
+                    "but blockchain audit submission failed"
                 ),
                 "application_id": request.application_id,
                 "audit_status": "FAILED",
-                "reason": str(exc)
+                "reason": str(e)
             }
-        ) from exc
+        )
 
-    # 5. Return the governance result and audit receipt.
+    # 5. Return governance result + blockchain receipt
     if isinstance(result_data, dict):
         response_data = dict(result_data)
     else:
-        response_data = {"governance_result": result_data}
+        response_data = {
+            "governance_result": result_data
+        }
 
     response_data["blockchain_audit"] = {
-        "status": audit_result.get("status", "UNKNOWN"),
+        "status": blockchain_receipt.get(
+            "status",
+            "UNKNOWN"
+        ),
+
         "application_id": request.application_id,
-        "audit_hash": audit_result.get("audit_hash"),
-        "transaction_hash": audit_result.get("transaction_hash"),
-        "audit_index": audit_result.get("audit_index")
+
+        "audit_hash": blockchain_receipt.get(
+            "audit_hash"
+        ),
+
+        "transaction_hash": blockchain_receipt.get(
+            "transaction_hash"
+        ),
+
+        "audit_index": blockchain_receipt.get(
+            "audit_index"
+        )
     }
 
     return response_data
