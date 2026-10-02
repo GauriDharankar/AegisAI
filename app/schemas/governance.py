@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union, Any
 from pydantic import BaseModel, Field
 
 
@@ -140,23 +140,34 @@ class RiskConfig(BaseModel):
 
 class AutoApproveConfig(BaseModel):
 
+    # Enable / disable automatic approval
     enabled: bool = False
 
+    # Minimum ML confidence required
     minimum_probability: float = Field(
         default=0.85,
         ge=0.0,
         le=1.0
     )
 
+    # Maximum risk level allowed for auto approval
     maximum_risk: Literal[
         "LOW",
         "MEDIUM",
         "HIGH"
     ] = "LOW"
 
+    # Additional governance requirements
     require_policy_compliance: bool = True
 
     require_fairness_pass: bool = True
+
+    # Loan types that are allowed to be automatically approved
+    eligible_loan_types: List[str] = Field(
+        default_factory=lambda: [
+            "PERSONAL_LOAN"
+        ]
+    )
 
 
 # ============================================================
@@ -186,7 +197,21 @@ class GovernanceRequest(BaseModel):
 
     tenant_id: str
 
-    features: Dict[str, float]
+    # Supports both numeric and string features.
+    #
+    # Examples:
+    # {
+    #     "credit_score": 780,
+    #     "income": 100000,
+    #     "loan_amount": 200000,
+    #     "age": 30,
+    #     "loan_type": "PERSONAL_LOAN",
+    #     "employment_type": "SALARIED"
+    # }
+    #
+    # This is required because loan_type and employment_type
+    # are categorical/string values.
+    features: Dict[str, Any]
 
     prediction: PredictionInput
 
