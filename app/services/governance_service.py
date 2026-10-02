@@ -226,13 +226,16 @@ class GovernanceService:
 
         routing_result = (
             self.routing_service.route_decision(
-                prediction=prediction,
-                fairness_result=fairness_result,
-                policy_result=policy_result,
-                risk_level=risk_level,
-                configuration=configuration
-            )
+            prediction=prediction,
+            fairness_result=fairness_result,
+            policy_result=policy_result,
+            risk_level=risk_level,
+            configuration={
+                **configuration,
+                "loan_type": features.get("loan_type", "")
+            }
         )
+    )
 
         decision_trace.append({
             "stage": "ROUTING",

@@ -41,17 +41,21 @@ class RoutingService:
         # ---------------------------------------------------------
         # 1. POLICY EVALUATION ERROR
         # ---------------------------------------------------------
+
         if policy_result.get("status") == "error":
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "POLICY_EVALUATION_ERROR",
-                "reason": "Policy evaluation could not be completed safely.",
+                "reason": (
+                    "Policy evaluation could not be completed safely."
+                ),
                 "flags": []
             }
 
         # ---------------------------------------------------------
         # 2. COLLECT POLICY RESULTS
         # ---------------------------------------------------------
+
         violations = policy_result.get("violations", [])
 
         critical_violations = [
@@ -81,11 +85,18 @@ class RoutingService:
         # ---------------------------------------------------------
         # 3. FORMAT NON-BLOCKING FLAGS
         # ---------------------------------------------------------
+
         flags = [
             {
                 "policy_id": violation.get("policy_id"),
-                "policy": violation.get("policy", "Unknown policy"),
-                "severity": violation.get("severity", "LOW")
+                "policy": violation.get(
+                    "policy",
+                    "Unknown policy"
+                ),
+                "severity": violation.get(
+                    "severity",
+                    "LOW"
+                )
             }
             for violation in flag_violations
         ]
@@ -93,7 +104,9 @@ class RoutingService:
         # ---------------------------------------------------------
         # 4. CRITICAL POLICY VIOLATION
         # ---------------------------------------------------------
+
         if critical_violations:
+
             violation = critical_violations[0]
 
             return {
@@ -109,7 +122,9 @@ class RoutingService:
         # ---------------------------------------------------------
         # 5. EXPLICIT REJECT POLICY
         # ---------------------------------------------------------
+
         if reject_violations:
+
             violation = reject_violations[0]
 
             return {
@@ -125,7 +140,9 @@ class RoutingService:
         # ---------------------------------------------------------
         # 6. EXPLICIT REVIEW POLICY
         # ---------------------------------------------------------
+
         if review_violations:
+
             violation = review_violations[0]
 
             return {
@@ -141,9 +158,11 @@ class RoutingService:
         # ---------------------------------------------------------
         # 7. FAIRNESS CHECK
         # ---------------------------------------------------------
+
         fairness_status = fairness_result.get("status")
 
         if fairness_status == "insufficient_data":
+
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "INSUFFICIENT_FAIRNESS_DATA",
@@ -155,6 +174,7 @@ class RoutingService:
             }
 
         if fairness_status == "violation":
+
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "FAIRNESS_VIOLATION",
@@ -168,24 +188,41 @@ class RoutingService:
         # ---------------------------------------------------------
         # 8. MODEL REJECTION
         # ---------------------------------------------------------
-        prediction_label = prediction.get("label", "").lower()
+
+        prediction_label = prediction.get(
+            "label",
+            ""
+        ).lower()
 
         if prediction_label == "reject":
+
             return {
                 "route": "REJECT",
                 "reason_code": "MODEL_REJECTION",
-                "reason": "The AI model predicted rejection.",
+                "reason": (
+                    "The AI model predicted rejection."
+                ),
                 "flags": flags
             }
 
         # ---------------------------------------------------------
         # 9. AUTO-APPROVAL CONFIGURATION
         # ---------------------------------------------------------
-        auto_config = configuration.get("auto_approve", {})
 
-        auto_enabled = auto_config.get("enabled", False)
+        auto_config = configuration.get(
+            "auto_approve",
+            {}
+        )
 
-        probability = prediction.get("probability", 0.0)
+        auto_enabled = auto_config.get(
+            "enabled",
+            False
+        )
+
+        probability = prediction.get(
+            "probability",
+            0.0
+        )
 
         minimum_probability = auto_config.get(
             "minimum_probability",
@@ -208,12 +245,64 @@ class RoutingService:
         )
 
         # ---------------------------------------------------------
-        # 10. CHECK AUTO-APPROVAL ELIGIBILITY
+        # 10. LOAN TYPE CONFIGURATION
         # ---------------------------------------------------------
+
+        eligible_loan_types = auto_config.get(
+            "eligible_loan_types",
+            ["PERSONAL_LOAN"]
+        )
+
+        # Normalize configured loan types
+        eligible_loan_types = [
+            str(loan_type).strip().upper()
+            for loan_type in eligible_loan_types
+        ]
+
+        # The loan type is expected inside the model features.
+        #
+        # Example:
+        # features = {
+        #     "loan_type": "PERSONAL_LOAN",
+        #     ...
+        # }
+        #
+        # IMPORTANT:
+        # RoutingService currently receives prediction,
+        # fairness_result, policy_result, risk_level and
+        # configuration — not features directly.
+        #
+        # Therefore the selected loan type must be passed
+        # through configuration.
+
+        current_loan_type = configuration.get(
+            "loan_type",
+            ""
+        )
+
+        current_loan_type = (
+            str(current_loan_type)
+            .strip()
+            .upper()
+        )
+
+        # ---------------------------------------------------------
+        # 11. CHECK AUTO-APPROVAL ELIGIBILITY
+        # ---------------------------------------------------------
+
         if auto_enabled:
 
-            probability_ok = probability >= minimum_probability
+            # Check whether this loan type is allowed
+            loan_type_allowed = (
+                current_loan_type in eligible_loan_types
+            )
 
+            # Check probability
+            probability_ok = (
+                probability >= minimum_probability
+            )
+
+            # Check risk
             risk_order = {
                 "LOW": 1,
                 "MEDIUM": 2,
@@ -230,26 +319,43 @@ class RoutingService:
                 1
             )
 
-            risk_ok = current_risk_value <= maximum_risk_value
+            risk_ok = (
+                current_risk_value
+                <= maximum_risk_value
+            )
 
+            # Check policy
             policy_ok = (
-                policy_result.get("passed", False)
+                policy_result.get(
+                    "passed",
+                    False
+                )
                 if require_policy_compliance
                 else True
             )
 
+            # Check fairness
             fairness_ok = (
-                fairness_result.get("passed", False)
+                fairness_result.get(
+                    "passed",
+                    False
+                )
                 if require_fairness_pass
                 else True
             )
 
+            # -------------------------------------------------
+            # ALL AUTO-APPROVAL CONDITIONS
+            # -------------------------------------------------
+
             if (
-                probability_ok
+                loan_type_allowed
+                and probability_ok
                 and risk_ok
                 and policy_ok
                 and fairness_ok
             ):
+
                 return {
                     "route": "AUTO_APPROVE",
                     "reason_code": "AUTO_APPROVAL",
@@ -260,10 +366,31 @@ class RoutingService:
                     "flags": flags
                 }
 
+            # -------------------------------------------------
+            # LOAN TYPE NOT ELIGIBLE
+            # -------------------------------------------------
+
+            if not loan_type_allowed:
+
+                return {
+                    "route": "HUMAN_REVIEW",
+                    "reason_code": "LOAN_TYPE_NOT_ELIGIBLE",
+                    "reason": (
+                        f"Automatic approval is not enabled "
+                        f"for {current_loan_type or 'this loan type'}."
+                    ),
+                    "flags": flags
+                }
+
         # ---------------------------------------------------------
-        # 11. LOW CONFIDENCE
+        # 12. LOW CONFIDENCE
         # ---------------------------------------------------------
-        if auto_enabled and probability < minimum_probability:
+
+        if (
+            auto_enabled
+            and probability < minimum_probability
+        ):
+
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "LOW_CONFIDENCE",
@@ -277,9 +404,11 @@ class RoutingService:
             }
 
         # ---------------------------------------------------------
-        # 12. AUTO-APPROVAL DISABLED
+        # 13. AUTO-APPROVAL DISABLED
         # ---------------------------------------------------------
+
         if not auto_enabled:
+
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "AUTO_APPROVAL_DISABLED",
@@ -291,11 +420,14 @@ class RoutingService:
             }
 
         # ---------------------------------------------------------
-        # 13. DEFAULT HUMAN REVIEW
+        # 14. DEFAULT HUMAN REVIEW
         # ---------------------------------------------------------
+
         return {
             "route": "HUMAN_REVIEW",
             "reason_code": "GOVERNANCE_REVIEW",
-            "reason": "The decision requires human governance review.",
+            "reason": (
+                "The decision requires human governance review."
+            ),
             "flags": flags
         }
