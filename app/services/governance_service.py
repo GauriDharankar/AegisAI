@@ -57,7 +57,8 @@ class GovernanceService:
         prediction: dict,
         fairness_data: dict,
         policies: list,
-        configuration: dict
+        configuration: dict,
+        loan_type: str | None = None
     ):
 
         governance_id = (
@@ -224,13 +225,17 @@ class GovernanceService:
         # 6. ROUTING
         # =====================================================
 
+        routing_configuration = dict(configuration)
+        if loan_type is not None:
+            routing_configuration["loan_type"] = loan_type
+
         routing_result = (
             self.routing_service.route_decision(
                 prediction=prediction,
                 fairness_result=fairness_result,
                 policy_result=policy_result,
                 risk_level=risk_level,
-                configuration=configuration
+                configuration=routing_configuration
             )
         )
 

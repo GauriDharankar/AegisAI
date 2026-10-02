@@ -1,4 +1,5 @@
 from app.services.governance_service import GovernanceService
+from app.services.routing_service import RoutingService
 
 
 service = GovernanceService()
@@ -156,3 +157,34 @@ def test_governance_metadata():
     assert result["tenant_id"] == "tenant_001"
     assert result["governance_id"].startswith("GOV-")
     assert result["timestamp"] is not None
+
+
+def _routing_inputs(loan_type):
+    return {
+        "prediction": {"label": "approve", "probability": 0.91},
+        "fairness_result": {"status": "pass", "passed": True},
+        "policy_result": {"status": "pass", "passed": True},
+        "risk_level": "LOW",
+        "configuration": {
+            "loan_type": loan_type,
+            "auto_approve": {
+                "enabled": True,
+                "minimum_probability": 0.85,
+                "maximum_risk": "LOW",
+                "eligible_loan_types": ["Personal Loan"],
+            },
+        },
+    }
+
+
+def test_auto_approval_normalizes_eligible_loan_types():
+    result = RoutingService().route_decision(**_routing_inputs(" personal loan "))
+
+    assert result["route"] == "AUTO_APPROVE"
+
+
+def test_ineligible_loan_type_requires_human_review():
+    result = RoutingService().route_decision(**_routing_inputs("mortgage"))
+
+    assert result["route"] == "HUMAN_REVIEW"
+    assert result["reason_code"] == "LOAN_TYPE_NOT_ELIGIBLE"

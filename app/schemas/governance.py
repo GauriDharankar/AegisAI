@@ -158,6 +158,8 @@ class AutoApproveConfig(BaseModel):
 
     require_fairness_pass: bool = True
 
+    eligible_loan_types: list[str] = Field(default_factory=list)
+
 
 # ============================================================
 # COMPLETE GOVERNANCE CONFIGURATION

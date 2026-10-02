@@ -83,6 +83,7 @@ def _evaluate_application(db: Session, tenant_id: str, payload: ApplicationCreat
             "risk": {"enabled": True},
             "auto_approve": {"enabled": False},
         },
+            loan_type=payload.loan_type,
     )
 
 

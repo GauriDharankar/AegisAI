@@ -95,7 +95,6 @@ class RoutingService:
         # ---------------------------------------------------------
         if critical_violations:
             violation = critical_violations[0]
-
             return {
                 "route": "REJECT",
                 "reason_code": "CRITICAL_POLICY_VIOLATION",
@@ -190,6 +189,7 @@ class RoutingService:
                     "auto_approve_probability",
                     0.85
                 ),
+
                 "maximum_risk": configuration.get(
                     "auto_approve_max_risk",
                     "LOW"
@@ -228,10 +228,30 @@ class RoutingService:
             True
         )
 
+        loan_type = configuration.get("loan_type")
+        eligible_loan_types = auto_config.get(
+            "eligible_loan_types",
+            configuration.get("eligible_loan_types", [])
+        ) or []
+        normalized_loan_type = self._normalize_loan_type(loan_type)
+        normalized_eligible_loan_types = {
+            self._normalize_loan_type(eligible_type)
+            for eligible_type in eligible_loan_types
+            if self._normalize_loan_type(eligible_type)
+        }
+
         # ---------------------------------------------------------
         # 10. CHECK AUTO-APPROVAL ELIGIBILITY
         # ---------------------------------------------------------
         if auto_enabled:
+
+            if normalized_eligible_loan_types and normalized_loan_type not in normalized_eligible_loan_types:
+                return {
+                    "route": "HUMAN_REVIEW",
+                    "reason_code": "LOAN_TYPE_NOT_ELIGIBLE",
+                    "reason": "This loan type is not eligible for automatic approval.",
+                    "flags": flags
+                }
 
             probability_ok = probability >= minimum_probability
 
@@ -320,3 +340,9 @@ class RoutingService:
             "reason": "The decision requires human governance review.",
             "flags": flags
         }
+
+    @staticmethod
+    def _normalize_loan_type(loan_type):
+        if loan_type is None:
+            return ""
+        return str(loan_type).strip().lower()
