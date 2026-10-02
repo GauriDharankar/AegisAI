@@ -18,5 +18,131 @@
     "model_version": "V1",
     "audit_hash": "0x67f3c1d5a47beaa6023565e727e9333df984f83e00284ca757d237f2d2ada2ad",
     "recorded_at": "2026-09-07T16:52:16.529Z"
+  },
+  {
+    "application_id": "APP-TEST-001",
+    "tenant_id": "TENANT-001",
+    "event_type": "GOVERNANCE_EVALUATION",
+    "ai_decision": "APPROVE",
+    "ai_score": 0.85,
+    "human_review": false,
+    "final_decision": "{'ORIGINAL_PREDICTION': 'APPROVE', 'MODEL_PROBABILITY': 0.85, 'FINAL_DECISION': 'HUMAN_REVIEW', 'REASON_CODE': 'INSUFFICIENT_FAIRNESS_DATA', 'REASON': 'THERE IS INSUFFICIENT DATA TO COMPLETE THE FAIRNESS EVALUATION.'}",
+    "governance_result": {
+      "tenant_id": "TENANT-001",
+      "governance_id": "GOV-EADB20084BA4",
+      "timestamp": "2026-10-02T12:37:45.994944+00:00",
+      "governance_status": "review_required",
+      "risk": {
+        "level": "HIGH"
+      },
+      "decision": {
+        "original_prediction": "approve",
+        "model_probability": 0.85,
+        "final_decision": "HUMAN_REVIEW",
+        "reason_code": "INSUFFICIENT_FAIRNESS_DATA",
+        "reason": "There is insufficient data to complete the fairness evaluation."
+      },
+      "explainability": {
+        "method": "SHAP",
+        "features": {
+          "income": 0.25629700855475535,
+          "credit_score": 0.09759869819614907,
+          "loan_amount": 0.028004881596913403,
+          "debt_to_income": 0.06393389627386757,
+          "employment_years": 0.0037246898912287607
+        },
+        "top_features": [
+          {
+            "feature": "income",
+            "impact": 0.256297,
+            "direction": "positive"
+          },
+          {
+            "feature": "credit_score",
+            "impact": 0.097599,
+            "direction": "positive"
+          },
+          {
+            "feature": "debt_to_income",
+            "impact": 0.063934,
+            "direction": "positive"
+          },
+          {
+            "feature": "loan_amount",
+            "impact": 0.028005,
+            "direction": "positive"
+          },
+          {
+            "feature": "employment_years",
+            "impact": 0.003725,
+            "direction": "positive"
+          }
+        ]
+      },
+      "fairness": {
+        "status": "insufficient_data",
+        "metric": "demographic_parity",
+        "message": "No fairness data was provided.",
+        "approval_rates": {}
+      },
+      "policy_compliance": {
+        "status": "compliant",
+        "passed": true,
+        "total_checks": 0,
+        "passed_checks": 0,
+        "failed_checks": 0,
+        "checks": [],
+        "violations": [],
+        "flags": [],
+        "errors": []
+      },
+      "routing": {
+        "route": "HUMAN_REVIEW",
+        "reason_code": "INSUFFICIENT_FAIRNESS_DATA",
+        "reason": "There is insufficient data to complete the fairness evaluation.",
+        "flags": []
+      },
+      "decision_trace": [
+        {
+          "stage": "MODEL",
+          "status": "completed",
+          "result": "approve",
+          "probability": 0.85
+        },
+        {
+          "stage": "SHAP",
+          "status": "completed",
+          "result": "explained"
+        },
+        {
+          "stage": "FAIRNESS",
+          "status": "insufficient_data",
+          "result": "insufficient_data"
+        },
+        {
+          "stage": "POLICY",
+          "status": "compliant",
+          "result": "pass"
+        },
+        {
+          "stage": "RISK",
+          "status": "completed",
+          "result": "HIGH"
+        },
+        {
+          "stage": "ROUTING",
+          "status": "completed",
+          "result": "HUMAN_REVIEW",
+          "reason_code": "INSUFFICIENT_FAIRNESS_DATA"
+        },
+        {
+          "stage": "FINAL",
+          "status": "review_required",
+          "result": "HUMAN_REVIEW"
+        }
+      ]
+    },
+    "audit_hash": "0xac3166701362d522c41f40b5bfb9b8a79fbe1931d7971268b278b295ccfc8738",
+    "recorded_at": "2026-10-02T12:38:07.668Z"
   }
 ]

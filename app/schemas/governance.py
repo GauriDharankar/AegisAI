@@ -194,7 +194,11 @@ class GovernanceConfig(BaseModel):
 # ============================================================
 
 class GovernanceRequest(BaseModel):
-
+    application_id: str = Field(
+        ...,
+        min_length=1,
+        description="Unique loan application ID for audit tracking"
+    )
     tenant_id: str
 
     # Supports both numeric and string features.
