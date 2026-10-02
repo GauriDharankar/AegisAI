@@ -1,4 +1,5 @@
 import api from "./api";
+import axios from "axios";
 import type { User, UserRole } from "../types/auth";
 
 export interface AuthLoginPayload {
@@ -131,6 +132,16 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
     return null;
   }
 
+  let cachedUser: User;
+
+  try {
+    cachedUser = JSON.parse(storedUser) as User;
+  } catch {
+    localStorage.removeItem("aegis_session");
+    localStorage.removeItem("aegis_user");
+    return null;
+  }
+
   try {
     const response = await api.get("/api/v1/auth/me", {
       headers: {
@@ -158,9 +169,16 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
       user,
     };
   } catch (error) {
-    localStorage.removeItem("aegis_session");
-    localStorage.removeItem("aegis_user");
-    return null;
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      localStorage.removeItem("aegis_session");
+      localStorage.removeItem("aegis_user");
+      return null;
+    }
+
+    return {
+      token,
+      user: cachedUser,
+    };
   }
 };
 

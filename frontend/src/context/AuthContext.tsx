@@ -12,6 +12,7 @@ import { restoreSession, logout as logoutRequest } from "../services/authService
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  isInitializing: boolean;
   isAuthenticated: boolean;
   login: (user: User, token: string) => void;
   logout: () => void;
@@ -28,17 +29,20 @@ export function AuthProvider({
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     const restoreAuthSession = async () => {
       const session = await restoreSession();
 
       if (!session) {
+        setIsInitializing(false);
         return;
       }
 
       setUser(session.user);
       setToken(session.token);
+      setIsInitializing(false);
     };
 
     void restoreAuthSession();
@@ -68,6 +72,7 @@ export function AuthProvider({
       value={{
         user,
         token,
+        isInitializing,
         isAuthenticated: user !== null,
         login,
         logout,

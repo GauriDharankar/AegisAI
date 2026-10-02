@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, FolderOpen, Loader2, Plus } from "lucide-react";
+import { AlertCircle, FolderOpen, Loader2, Plus } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { getTeams } from "../services/adminService";
 import api from "../services/api";
 import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 interface ApplicationRecord {
   id: string;
@@ -57,13 +58,13 @@ const emptyForm = {
 
 export default function AdminApplications() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const loadTeams = async () => {
     if (!token) {
@@ -134,7 +135,6 @@ export default function AdminApplications() {
 
     setSubmitting(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       await api.post(
@@ -162,7 +162,7 @@ export default function AdminApplications() {
       );
 
       setForm(emptyForm);
-      setSuccessMessage("Application created successfully.");
+      showToast("Application created successfully");
       await Promise.all([loadApplications(), loadTeams()]);
     } catch (createError) {
       setError(getErrorMessage(createError, "Unable to create the application."));
@@ -190,13 +190,6 @@ export default function AdminApplications() {
           <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <AlertCircle size={16} className="mt-0.5" />
             <span>{error}</span>
-          </div>
-        )}
-
-        {successMessage && (
-          <div className="mb-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            <CheckCircle2 size={16} className="mt-0.5" />
-            <span>{successMessage}</span>
           </div>
         )}
 

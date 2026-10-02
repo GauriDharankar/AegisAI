@@ -19,6 +19,7 @@ import {
 import { NavLink, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "./ToastProvider";
 import type { UserRole } from "../types/auth";
 
 interface MenuItem {
@@ -148,10 +149,12 @@ const menuItems: MenuItem[] = [
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
+    showToast("Logout successful");
     navigate("/login");
   };
 

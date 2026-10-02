@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { reviewService, type ReviewerApplication } from "../services/reviewService";
 import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 export default function ApplicationReview() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { token } = useAuth();
+  const { showToast } = useToast();
 
   const [application, setApplication] = useState<ReviewerApplication | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [decision, setDecision] = useState<"approved" | "rejected" | "pending">("pending");
   const [comments, setComments] = useState("");
   const [finalDecision, setFinalDecision] = useState<"approved" | "rejected">("approved");
@@ -52,31 +53,22 @@ export default function ApplicationReview() {
 
     setSubmitting(true);
     setSubmissionError(null);
-    setSuccessMessage(null);
 
     try {
       if (application?.current_workflow_stage === "FINAL_DECISION") {
-        const result = await reviewService.submitFinalDecision(token, id, {
+        await reviewService.submitFinalDecision(token, id, {
           decision: finalDecision,
           comments: comments.trim() || undefined,
         });
 
-        setSuccessMessage(
-          `Final decision submitted: ${result.decision.toUpperCase()}.`
-        );
+        showToast("Final decision saved successfully");
       } else {
-        const result = await reviewService.submitReview(token, id, {
+        await reviewService.submitReview(token, id, {
           status: decision,
           comments: comments.trim() || undefined,
         });
 
-        setSuccessMessage(
-          `Review submitted successfully. ${
-            result.next_stage ? `Next stage: ${result.next_stage}.` : ""
-          }${
-            result.next_team_id ? ` Team updated: ${result.next_team_id}.` : ""
-          }`
-        );
+        showToast("Review submitted successfully");
       }
 
       const refreshed = await reviewService.getApplication(token, id);
@@ -208,13 +200,6 @@ export default function ApplicationReview() {
             ? "Provide the final approval or rejection for this application."
             : "Provide the reviewer outcome and notes for the current workflow stage."}
         </p>
-
-        {successMessage && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            <CheckCircle2 className="mt-0.5 h-4 w-4" />
-            <span>{successMessage}</span>
-          </div>
-        )}
 
         {submissionError && (
           <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

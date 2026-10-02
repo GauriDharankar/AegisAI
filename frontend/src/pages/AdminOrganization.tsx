@@ -3,9 +3,12 @@ import { Building2 } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { getOrganization, updateOrganization } from "../services/adminService";
+import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 export default function AdminOrganization() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [organization, setOrganization] = useState<any>(null);
   const [form, setForm] = useState({ organization_name: "", status: "active" });
   const [loading, setLoading] = useState(true);
@@ -43,6 +46,9 @@ export default function AdminOrganization() {
     try {
       await updateOrganization(token, form);
       await loadOrganization();
+      showToast("Organization updated successfully");
+    } catch (error) {
+      showToast(getErrorMessage(error, "Unable to update organization"), "error");
     } finally {
       setSaving(false);
     }

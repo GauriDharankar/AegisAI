@@ -3,6 +3,8 @@ import { Award, BriefcaseBusiness } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { assignUserResponsibility, getUsers } from "../services/adminService";
+import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 const RESPONSIBILITY_OPTIONS = [
   "TENANT_ADMIN",
@@ -14,6 +16,7 @@ const RESPONSIBILITY_OPTIONS = [
 
 export default function AdminResponsibilities() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [responsibility, setResponsibility] = useState("OPERATIONS_REVIEWER");
@@ -63,6 +66,9 @@ export default function AdminResponsibilities() {
     try {
       await assignUserResponsibility(token, selectedUserId, { responsibility });
       await loadUsers();
+      showToast("Responsibility updated successfully");
+    } catch (error) {
+      showToast(getErrorMessage(error, "Unable to update responsibility"), "error");
     } finally {
       setSubmitting(false);
     }

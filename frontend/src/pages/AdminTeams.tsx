@@ -4,9 +4,11 @@ import { Plus } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { createTeam, getTeams } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 export default function AdminTeams() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [teams, setTeams] = useState<any[]>([]);
   const [teamName, setTeamName] = useState("");
   const [description, setDescription] = useState("");
@@ -48,6 +50,7 @@ export default function AdminTeams() {
       setTeamName("");
       setDescription("");
       await loadTeams();
+      showToast("Team created successfully");
     } catch (createError) {
       setError(getErrorMessage(createError, "Unable to create the team."));
     }

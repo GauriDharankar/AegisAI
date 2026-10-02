@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getTeams, getWorkflow, updateWorkflow } from "../services/adminService";
+import { getErrorMessage } from "../services/errorMessage";
+import { useToast } from "../components/ToastProvider";
 
 const STAGE_TYPE_OPTIONS = [
   "OPERATIONS_REVIEW",
@@ -27,6 +29,7 @@ interface WorkflowRecord {
 
 export default function AdminWorkflow() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [teams, setTeams] = useState<any[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowRecord>({
     name: "Default Governance Workflow",
@@ -143,8 +146,13 @@ export default function AdminWorkflow() {
       })),
     };
 
-    await updateWorkflow(token, payload);
-    await loadData();
+    try {
+      await updateWorkflow(token, payload);
+      await loadData();
+      showToast("Workflow saved successfully");
+    } catch (error) {
+      showToast(getErrorMessage(error, "Unable to save workflow"), "error");
+    }
   };
 
   if (loading) {

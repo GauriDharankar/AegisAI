@@ -12,6 +12,7 @@ import {
   removeUserTeam,
   updateUserStatus,
 } from "../services/adminService";
+import { useToast } from "../components/ToastProvider";
 
 const RESPONSIBILITY_OPTIONS = [
   "TENANT_ADMIN",
@@ -23,6 +24,7 @@ const RESPONSIBILITY_OPTIONS = [
 
 export default function AdminUsers() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -73,6 +75,7 @@ export default function AdminUsers() {
       setEmail("");
       setPassword("SecurePass123");
       await loadUsers();
+      showToast("User created successfully");
     } catch (createError) {
       setError(getErrorMessage(createError, "Unable to create the user."));
     }
@@ -89,6 +92,7 @@ export default function AdminUsers() {
     try {
       await updateUserStatus(token, userId, nextStatus);
       await loadUsers();
+      showToast("User updated successfully");
     } catch (statusError) {
       setError(getErrorMessage(statusError, "Unable to update user status."));
     } finally {
@@ -106,6 +110,7 @@ export default function AdminUsers() {
     try {
       await assignUserResponsibility(token, userId, { responsibility });
       await loadUsers();
+      showToast("Responsibility updated successfully");
     } catch (responsibilityError) {
       setError(getErrorMessage(responsibilityError, "Unable to update user responsibility."));
     } finally {
@@ -126,6 +131,7 @@ export default function AdminUsers() {
         role: teamRoles[userId] || "OPERATIONS_REVIEWER",
       });
       await loadUsers();
+      showToast("Team assigned successfully");
     } catch (teamError) {
       setError(getErrorMessage(teamError, "Unable to assign the selected team."));
     } finally {
@@ -143,6 +149,7 @@ export default function AdminUsers() {
     try {
       await removeUserTeam(token, userId, teamId);
       await loadUsers();
+      showToast("Team assignment removed");
     } catch (removeError) {
       setError(getErrorMessage(removeError, "Unable to remove the team assignment."));
     } finally {
@@ -160,6 +167,7 @@ export default function AdminUsers() {
     try {
       await assignUserTeam(token, userId, { team_id: teamId, role });
       await loadUsers();
+      showToast("Team responsibility updated");
     } catch (roleError) {
       setError(getErrorMessage(roleError, "Unable to update the team responsibility."));
     } finally {
@@ -207,8 +215,8 @@ export default function AdminUsers() {
         {loading ? (
           <div className="text-slate-600">Loading users…</div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="min-w-[760px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="px-4 py-3 font-medium">Name</th>

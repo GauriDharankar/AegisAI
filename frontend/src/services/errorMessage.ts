@@ -1,11 +1,5 @@
 import axios from "axios";
 
-type ApiValidationDetail = {
-  msg?: string;
-  loc?: Array<string | number>;
-  type?: string;
-};
-
 function formatDetail(detail: unknown): string | null {
   if (typeof detail === "string" && detail.trim()) {
     return detail.trim();
@@ -59,12 +53,8 @@ export function getErrorMessage(error: unknown, fallback = "Something went wrong
       case 500:
         return "The server could not complete this action. Please try again.";
       default:
-        return error.message || fallback;
+        return fallback;
     }
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
   }
 
   return fallback;
