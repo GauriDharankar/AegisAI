@@ -7,6 +7,13 @@ import {
   Bell,
   Clock3,
   LogOut,
+  Users,
+  Building2,
+  GitBranch,
+  BriefcaseBusiness,
+  FolderOpen,
+  FileText,
+  ShieldCheck,
 } from "lucide-react";
 
 import { NavLink, useNavigate } from "react-router-dom";
@@ -34,6 +41,12 @@ const menuItems: MenuItem[] = [
     path: "/dashboard",
     icon: LayoutDashboard,
     roles: allRoles,
+  },
+  {
+    name: "Tenant Dashboard",
+    path: "/admin/dashboard",
+    icon: ShieldCheck,
+    roles: ["MANAGER"],
   },
   {
     name: "Decision Queue",
@@ -72,6 +85,54 @@ const menuItems: MenuItem[] = [
     roles: ["MANAGER"],
   },
   {
+    name: "Organization",
+    path: "/admin/organization",
+    icon: Building2,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Users",
+    path: "/admin/users",
+    icon: Users,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Teams",
+    path: "/admin/teams",
+    icon: ClipboardCheck,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Responsibilities",
+    path: "/admin/responsibilities",
+    icon: BriefcaseBusiness,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Workflow",
+    path: "/admin/workflow",
+    icon: GitBranch,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Applications",
+    path: "/admin/applications",
+    icon: FolderOpen,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Audit Logs",
+    path: "/admin/audit",
+    icon: FileText,
+    roles: ["MANAGER"],
+  },
+  {
+    name: "Settings",
+    path: "/admin/settings",
+    icon: Settings,
+    roles: ["MANAGER"],
+  },
+  {
     name: "Notifications",
     path: "/notifications",
     icon: Bell,
@@ -101,7 +162,7 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-slate-950 text-white">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-slate-950 text-white">
 
       {/* =========================
           LOGO
@@ -112,8 +173,8 @@ export default function Sidebar() {
           AegisAI
         </h1>
 
-        <p className="mt-1 text-xs text-slate-400">
-          AI Decision Governance
+        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+          Multi Tenant AI Governance Engine
         </p>
       </div>
 
@@ -125,16 +186,16 @@ export default function Sidebar() {
       {user && (
         <div className="border-b border-slate-800 px-5 py-4">
           <p className="truncate text-sm font-medium text-white">
-            {user.name}
+            {user.tenant_name ?? "Current Organization"}
           </p>
 
           <p className="mt-1 text-xs text-slate-400">
-            {user.role.replace("_", " ")}
+            {user.name}
           </p>
 
-          <span className="mt-2 inline-block rounded-full bg-blue-900 px-2.5 py-1 text-xs text-blue-200">
-            Level {user.level}
-          </span>
+          <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+            {user.role.replace("_", " ")}
+          </p>
         </div>
       )}
 
@@ -143,38 +204,40 @@ export default function Sidebar() {
           NAVIGATION
       ========================== */}
 
-      <nav className="space-y-1 p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <nav className="space-y-1 p-4">
 
-        {visibleMenuItems.map((item) => {
-          const Icon = item.icon;
+          {visibleMenuItems.map((item) => {
+            const Icon = item.icon;
 
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-4 py-3 text-sm transition ${
-                  isActive
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-400 hover:bg-slate-900 hover:text-white"
-                }`
-              }
-            >
-              <Icon size={19} />
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-lg px-4 py-3 text-sm transition ${
+                    isActive
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-white"
+                  }`
+                }
+              >
+                <Icon size={19} />
 
-              <span>{item.name}</span>
-            </NavLink>
-          );
-        })}
+                <span>{item.name}</span>
+              </NavLink>
+            );
+          })}
 
-      </nav>
+        </nav>
+      </div>
 
 
       {/* =========================
           LOGOUT
       ========================== */}
 
-      <div className="absolute bottom-0 w-full border-t border-slate-800 p-4">
+      <div className="shrink-0 border-t border-slate-800 p-4">
 
         <button
           onClick={handleLogout}

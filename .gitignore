@@ -1,5 +1,47 @@
 .venv/
+venv/
 .env
-__pycache__/
-*.pyc
+.env.*
+
+# Local databases and test state
+aegisai.db
+.pytest_db/
 .pytest_cache/
+.pytest-current-output.txt
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Test output and logs
+pytest*.txt
+pytest*.log
+*_pytest*.txt
+*_pytest*.log
+app_tests_out.txt
+backend-final.txt
+db_check_output.txt
+reviewer-regression.txt
+
+# Temporary debug scripts and notebooks
+debug_*.py
+tmp_*.py
+tmp_*.ipynb
+run_debug_*.cmd
+rewrite_requirements.py
+
+# VS Code workspace-local files
+.vscode/
+
+# Hunter test output
+hunter_test_output.txt
+
+# Frontend dependencies and generated output
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/*-build.txt
+frontend/*-output.txt
+
+# General logs
+*.log

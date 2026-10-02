@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin import router as admin_router
+from app.api.applications import router as applications_router
+from app.api.auth import router as auth_router
 from app.api.governance import router as governance_router
+from app.api.hunter import router as hunter_router
+from app.api.reviewer import router as reviewer_router
+from app.db.database import init_db
+from app.db.seed import seed_demo_data
 
 
 app = FastAPI(
@@ -12,6 +19,12 @@ app = FastAPI(
     ),
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def startup_event() -> None:
+    init_db()
+    seed_demo_data()
 
 
 app.add_middleware(
@@ -26,7 +39,12 @@ app.add_middleware(
 )
 
 
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(applications_router)
+app.include_router(reviewer_router)
 app.include_router(governance_router)
+app.include_router(hunter_router)
 
 
 @app.get("/")

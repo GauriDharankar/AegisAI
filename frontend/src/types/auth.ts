@@ -10,4 +10,8 @@ export interface User {
   email: string;
   role: UserRole;
   level: 1 | 2 | 3 | 4;
+  tenant_id?: string;
+  tenant_name?: string;
+  responsibilities?: string[];
+  teams?: Array<{ id: string; name: string; role?: string | null }>;
 }

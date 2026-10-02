@@ -183,6 +183,27 @@ class RoutingService:
         # ---------------------------------------------------------
         auto_config = configuration.get("auto_approve", {})
 
+        if not auto_config:
+            auto_config = {
+                "enabled": configuration.get("auto_approve_enabled", False),
+                "minimum_probability": configuration.get(
+                    "auto_approve_probability",
+                    0.85
+                ),
+                "maximum_risk": configuration.get(
+                    "auto_approve_max_risk",
+                    "LOW"
+                ),
+                "require_policy_compliance": configuration.get(
+                    "require_policy_compliance",
+                    True
+                ),
+                "require_fairness_pass": configuration.get(
+                    "require_fairness_pass",
+                    True
+                )
+            }
+
         auto_enabled = auto_config.get("enabled", False)
 
         probability = prediction.get("probability", 0.0)

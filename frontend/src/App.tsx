@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -21,10 +22,23 @@ import Policies from "./pages/Policies";
 import FairnessBias from "./pages/FairnessBias";
 import Configuration from "./pages/Configuration";
 import AuditTrail from "./pages/AuditTrail";
+import AdminDashboard from "./pages/AdminDashboard";
+import AdminOrganization from "./pages/AdminOrganization";
+import AdminTeams from "./pages/AdminTeams";
+import AdminUsers from "./pages/AdminUsers";
+import AdminResponsibilities from "./pages/AdminResponsibilities";
+import AdminWorkflow from "./pages/AdminWorkflow.tsx";
+import AdminApplications from "./pages/AdminApplications";
+import AdminAudit from "./pages/AdminAudit";
+import AdminSettings from "./pages/AdminSettings";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
+  useEffect(() => {
+    document.title = "AegisAI · Multi Tenant AI Governance Engine";
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>
@@ -33,7 +47,8 @@ function App() {
             PUBLIC ROUTES
         ========================== */}
 
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<Login initialMode="login" />} />
+        <Route path="/register" element={<Login initialMode="register" />} />
 
         <Route
           path="/unauthorized"
@@ -199,6 +214,97 @@ function App() {
                 allowedRoles={["MANAGER"]}
               >
                 <Configuration />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Tenant Admin */}
+          <Route
+            path="admin"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <Navigate to="/admin/dashboard" replace />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/organization"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminOrganization />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/users"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminUsers />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/teams"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminTeams />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/responsibilities"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminResponsibilities />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/workflow"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminWorkflow />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/applications"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminApplications />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/audit"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminAudit />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/settings"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminSettings />
               </ProtectedRoute>
             }
           />

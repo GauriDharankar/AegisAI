@@ -5,6 +5,11 @@ export default function Topbar() {
   const { user } = useAuth();
 
   const getRoleName = () => {
+    const assignedRoles = user?.teams?.map((team) => team.role).filter(Boolean) ?? [];
+    if (assignedRoles.length > 0) {
+      return assignedRoles.join(" · ");
+    }
+
     switch (user?.role) {
       case "OPERATIONS":
         return "Operations Team";
@@ -16,7 +21,7 @@ export default function Topbar() {
         return "Credit Committee";
 
       case "MANAGER":
-        return "Manager";
+        return "Tenant Admin";
 
       default:
         return "Human Reviewer";
@@ -40,11 +45,11 @@ export default function Topbar() {
       {/* Left Section */}
       <div>
         <h2 className="text-xl font-semibold text-slate-800">
-          AI Decision Governance
+          {user?.tenant_name ?? "Current Organization"}
         </h2>
 
         <p className="text-sm text-slate-500">
-          Explainable, fair and policy-compliant lending decisions
+          AegisAI · Multi Tenant AI Governance Engine · {user?.role ? getRoleName() : "Authenticated user"}
         </p>
       </div>
 

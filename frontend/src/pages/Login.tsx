@@ -9,436 +9,366 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
-import type { User, UserRole } from "../types/auth";
+import { login as loginRequest, register as registerRequest } from "../services/authService";
+import { getErrorMessage } from "../services/errorMessage";
+import type { User } from "../types/auth";
 
-interface DemoUser {
-  email: string;
-  password: string;
-  role: UserRole;
-  level: 1 | 2 | 3 | 4;
-  name: string;
-}
-
-const demoUsers: DemoUser[] = [
-  {
-    email: "operations@aegis.ai",
-    password: "Aegis123",
-    role: "OPERATIONS",
-    level: 1,
-    name: "Operations User",
-  },
-  {
-    email: "risk@aegis.ai",
-    password: "Aegis123",
-    role: "RISK_OFFICER",
-    level: 2,
-    name: "Risk Officer",
-  },
-  {
-    email: "committee@aegis.ai",
-    password: "Aegis123",
-    role: "CREDIT_COMMITTEE",
-    level: 3,
-    name: "Credit Committee",
-  },
-  {
-    email: "manager@aegis.ai",
-    password: "Aegis123",
-    role: "MANAGER",
-    level: 4,
-    name: "Manager",
-  },
-];
-
-export default function Login() {
+export default function Login({ initialMode = "login" }: { initialMode?: "login" | "register" }) {
   const navigate = useNavigate();
   const { login } = useAuth();
 
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [organizationName, setOrganizationName] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-
+  const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError("");
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Basic validation
     if (!normalizedEmail || !password) {
       setError("Please enter your email and password.");
       return;
     }
 
-    setIsLoading(true);
+    try {
+      setIsLoading(true);
+      const session = await loginRequest({
+        email: normalizedEmail,
+        password,
+      });
 
-    /*
-      TEMPORARY FRONTEND AUTHENTICATION
+      const loggedInUser: User = {
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        role: session.user.role,
+        level: session.user.level,
+        tenant_id: session.user.tenant_id,
+        tenant_name: session.user.tenant_name,
+        responsibilities: session.user.responsibilities,
+        teams: session.user.teams,
+      };
 
-      These demo accounts are only for frontend development.
-      Later, replace this section with the FastAPI
-      authentication endpoint.
-    */
+      login(loggedInUser, session.token);
 
-    const matchedUser = demoUsers.find(
-      (item) =>
-        item.email === normalizedEmail &&
-        item.password === password
-    );
+      if (rememberMe) {
+        localStorage.setItem("aegis_session", session.token);
+      }
 
-    if (!matchedUser) {
+      navigate("/dashboard", { replace: true });
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, "Invalid email or password."));
+    } finally {
       setIsLoading(false);
-      setError("Invalid email or password.");
+    }
+  };
+
+  const handleRegisterSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+
+    if (!organizationName.trim() || !fullName.trim() || !email.trim() || !password) {
+      setError("Please complete all registration fields.");
       return;
     }
 
-    // Create the authenticated user
-    const loggedInUser: User = {
-      id: matchedUser.email,
-      name: matchedUser.name,
-      email: matchedUser.email,
-      role: matchedUser.role,
-      level: matchedUser.level,
-    };
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
 
-    /*
-      AuthContext handles:
-      1. React authentication state
-      2. localStorage persistence
-    */
-    login(loggedInUser);
+    try {
+      setIsLoading(true);
+      const session = await registerRequest({
+        organization_name: organizationName.trim(),
+        name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        confirm_password: confirmPassword,
+      });
 
-    /*
-      Remember me is currently visual/demo-only.
-      Authentication persistence is already handled
-      by AuthContext using localStorage.
-    */
-    void rememberMe;
+      const loggedInUser: User = {
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        role: session.user.role,
+        level: session.user.level,
+        tenant_id: session.user.tenant_id,
+        tenant_name: session.user.tenant_name,
+        responsibilities: session.user.responsibilities,
+        teams: session.user.teams,
+      };
 
-    setIsLoading(false);
-
-    navigate("/dashboard", { replace: true });
+      login(loggedInUser, session.token);
+      navigate("/dashboard", { replace: true });
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, "Organization registration failed."));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="flex min-h-screen">
-
-        {/* =====================================================
-            LEFT SECTION
-        ====================================================== */}
-
         <div className="hidden w-1/2 bg-slate-900 lg:flex">
           <div className="flex w-full flex-col justify-between p-12 text-white">
-
-            {/* Logo + Introduction */}
             <div>
               <div className="flex items-center gap-3">
-
                 <div className="rounded-xl bg-blue-600 p-3">
                   <ShieldCheck size={28} />
                 </div>
-
                 <div>
-                  <h1 className="text-2xl font-bold">
-                    AegisAI
-                  </h1>
-
-                  <p className="text-sm text-slate-400">
-                    AI Governance Platform
-                  </p>
+                  <h1 className="text-2xl font-bold">AegisAI</h1>
+                  <p className="text-sm text-slate-400">Multi Tenant AI Governance Engine</p>
                 </div>
-
               </div>
 
               <div className="mt-20 max-w-lg">
                 <h2 className="text-4xl font-bold leading-tight">
-                  Responsible AI Decision Governance
+                  Multi Tenant AI Governance Engine
                 </h2>
-
                 <p className="mt-6 text-lg leading-8 text-slate-400">
-                  Securely review, monitor and govern
-                  AI-powered lending decisions with
-                  human oversight.
+                  Configure the workflow that matches your organization, review decisions with accountable oversight, and keep governance aligned to the tenant’s operating model.
                 </p>
               </div>
             </div>
-
-            {/* =================================================
-                APPROVAL HIERARCHY
-            ================================================== */}
 
             <div className="space-y-3">
-
-              {/* Level 4 */}
               <div className="rounded-lg border border-slate-700 bg-slate-800 p-4">
-                <p className="text-xs text-slate-400">
-                  LEVEL 4
-                </p>
-
-                <p className="font-semibold">
-                  Manager
-                </p>
-
-                <p className="text-sm text-slate-400">
-                  Access to all decisions
-                </p>
-              </div>
-
-              {/* Levels 1-3 */}
-              <div className="grid grid-cols-3 gap-3">
-
-                {/* Level 3 */}
-                <div className="rounded-lg border border-slate-700 bg-slate-800 p-3">
-                  <p className="text-xs text-slate-400">
-                    LEVEL 3
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    Credit Committee
-                  </p>
-                </div>
-
-                {/* Level 2 */}
-                <div className="rounded-lg border border-slate-700 bg-slate-800 p-3">
-                  <p className="text-xs text-slate-400">
-                    LEVEL 2
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    Risk Officer
-                  </p>
-                </div>
-
-                {/* Level 1 */}
-                <div className="rounded-lg border border-slate-700 bg-slate-800 p-3">
-                  <p className="text-xs text-slate-400">
-                    LEVEL 1
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    Operations
-                  </p>
-                </div>
-
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Tenant scope</p>
+                <p className="mt-2 text-lg font-semibold text-white">Organization-first governance</p>
+                <p className="mt-2 text-sm text-slate-400">Each tenant has its own workflow, teams, responsibilities, and approval paths.</p>
               </div>
             </div>
-
           </div>
         </div>
 
-
-        {/* =====================================================
-            LOGIN SECTION
-        ====================================================== */}
-
         <div className="flex w-full items-center justify-center bg-white p-6 lg:w-1/2">
-
           <div className="w-full max-w-md">
-
-            {/* =================================================
-                MOBILE LOGO
-            ================================================== */}
-
             <div className="mb-8 flex items-center gap-3 lg:hidden">
-
               <div className="rounded-xl bg-blue-600 p-3 text-white">
                 <ShieldCheck size={24} />
               </div>
-
               <div>
-                <h1 className="text-xl font-bold text-slate-800">
-                  AegisAI
-                </h1>
+                <h1 className="text-xl font-bold text-slate-800">AegisAI</h1>
+                <p className="text-xs text-slate-500">Multi Tenant AI Governance Engine</p>
+              </div>
+            </div>
 
-                <p className="text-xs text-slate-500">
-                  AI Governance Platform
+            <div className="mb-8 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-3xl font-bold text-slate-800">
+                  {mode === "login" ? "Welcome back" : "Create your workspace"}
+                </h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  {mode === "login"
+                    ? "Sign in to access your governance workspace."
+                    : "Create a new organization and admin account."}
                 </p>
               </div>
-
+              <button
+                type="button"
+                className="rounded border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700"
+                onClick={() => setMode((previous) => (previous === "login" ? "register" : "login"))}
+              >
+                {mode === "login" ? "Create Organization" : "Back to Login"}
+              </button>
             </div>
-
-
-            {/* =================================================
-                PAGE HEADING
-            ================================================== */}
-
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold text-slate-800">
-                Welcome back
-              </h2>
-
-              <p className="mt-2 text-sm text-slate-500">
-                Sign in to access your governance workspace.
-              </p>
-            </div>
-
-
-            {/* =================================================
-                ERROR MESSAGE
-            ================================================== */}
 
             {error && (
-              <div
-                role="alert"
-                className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600"
-              >
+              <div role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                 {error}
               </div>
             )}
 
-
-            {/* =================================================
-                LOGIN FORM
-            ================================================== */}
-
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-5"
-            >
-
-              {/* Email */}
-              <div>
-
-                <label
-                  htmlFor="email"
-                  className="mb-2 block text-sm font-medium text-slate-700"
-                >
-                  Email Address
-                </label>
-
-                <div className="relative">
-
-                  <Mail
-                    size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setError("");
-                    }}
-                    placeholder="Enter your email"
-                    className="w-full rounded-lg border border-slate-200 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  />
-
+            {mode === "login" ? (
+              <form onSubmit={handleLoginSubmit} className="space-y-5">
+                <div>
+                  <label htmlFor="email" className="mb-2 block text-sm font-medium text-slate-700">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(event) => {
+                        setEmail(event.target.value);
+                        setError("");
+                      }}
+                      placeholder="Enter your email"
+                      className="w-full rounded-lg border border-slate-200 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
                 </div>
-              </div>
 
+                <div>
+                  <label htmlFor="password" className="mb-2 block text-sm font-medium text-slate-700">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <LockIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        setError("");
+                      }}
+                      placeholder="Enter your password"
+                      className="w-full rounded-lg border border-slate-200 py-3 pl-10 pr-12 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((previous) => !previous)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-700"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
 
-              {/* Password */}
-              <div>
-
-                <label
-                  htmlFor="password"
-                  className="mb-2 block text-sm font-medium text-slate-700"
-                >
-                  Password
-                </label>
-
-                <div className="relative">
-
-                  <LockIcon
-                    size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-
-                  <input
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setError("");
-                    }}
-                    placeholder="Enter your password"
-                    className="w-full rounded-lg border border-slate-200 py-3 pl-10 pr-12 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  />
-
+                <div className="flex items-center justify-between">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(event) => setRememberMe(event.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    Remember me
+                  </label>
                   <button
                     type="button"
-                    onClick={() =>
-                      setShowPassword((previous) => !previous)
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-700"
-                    aria-label={
-                      showPassword
-                        ? "Hide password"
-                        : "Show password"
-                    }
+                    onClick={() => setError("Password recovery is not enabled yet.")}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
                   >
-                    {showPassword ? (
-                      <EyeOff size={18} />
-                    ) : (
-                      <Eye size={18} />
-                    )}
+                    Forgot password?
                   </button>
-
                 </div>
-              </div>
-
-
-              {/* Remember / Forgot */}
-              <div className="flex items-center justify-between">
-
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500">
-
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) =>
-                      setRememberMe(e.target.checked)
-                    }
-                    className="rounded border-slate-300"
-                  />
-
-                  Remember me
-
-                </label>
 
                 <button
-                  type="button"
-                  onClick={() =>
-                    setError(
-                      "Password recovery will be available when backend authentication is connected."
-                    )
-                  }
-                  className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full rounded-lg bg-blue-600 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Forgot password?
+                  {isLoading ? "Signing in..." : "Sign In"}
                 </button>
+              </form>
+            ) : (
+              <form onSubmit={handleRegisterSubmit} className="space-y-5">
+                <div>
+                  <label htmlFor="organizationName" className="mb-2 block text-sm font-medium text-slate-700">
+                    Organization Name
+                  </label>
+                  <input
+                    id="organizationName"
+                    value={organizationName}
+                    onChange={(event) => {
+                      setOrganizationName(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="Acme Finance"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
-              </div>
+                <div>
+                  <label htmlFor="fullName" className="mb-2 block text-sm font-medium text-slate-700">
+                    Admin Full Name
+                  </label>
+                  <input
+                    id="fullName"
+                    value={fullName}
+                    onChange={(event) => {
+                      setFullName(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="Jane Smith"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
+                <div>
+                  <label htmlFor="register-email" className="mb-2 block text-sm font-medium text-slate-700">
+                    Admin Email
+                  </label>
+                  <input
+                    id="register-email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="admin@company.com"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
-              {/* Sign In */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-lg bg-blue-600 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isLoading ? "Signing in..." : "Sign In"}
-              </button>
+                <div>
+                  <label htmlFor="register-password" className="mb-2 block text-sm font-medium text-slate-700">
+                    Password
+                  </label>
+                  <input
+                    id="register-password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="Create a strong password"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
-            </form>
+                <div>
+                  <label htmlFor="confirm-password" className="mb-2 block text-sm font-medium text-slate-700">
+                    Confirm Password
+                  </label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => {
+                      setConfirmPassword(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="Confirm password"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
-
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full rounded-lg bg-blue-600 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLoading ? "Creating workspace..." : "Create Organization"}
+                </button>
+              </form>
+            )}
           </div>
-
+        </div>
       </div>
-    </div>
     </div>
   );
 }

@@ -29,11 +29,11 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">
-          Review Dashboard
+          Organization Dashboard
         </h1>
 
         <p className="mt-1 text-slate-500">
-          Overview of AI decision monitoring and human reviews.
+          Overview of the current tenant’s users, teams, responsibilities, reviews, and governance workflow.
         </p>
       </div>
 

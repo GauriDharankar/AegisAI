@@ -1,35 +1,69 @@
-import { useState } from "react";
-import { Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Loader2, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { applications } from "../data/mockData";
+import { useAuth } from "../context/AuthContext";
+import { reviewService, type ReviewerApplication } from "../services/reviewService";
+import { getErrorMessage } from "../services/errorMessage";
 
 export default function ReviewQueue() {
   const navigate = useNavigate();
+  const { token } = useAuth();
 
+  const [applications, setApplications] = useState<ReviewerApplication[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("ALL");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredApplications = applications.filter((application) => {
-    const matchesSearch =
-      application.applicantName
-        .toLowerCase()
-        .includes(search.toLowerCase()) ||
-      application.id.toLowerCase().includes(search.toLowerCase());
+  useEffect(() => {
+    const loadApplications = async () => {
+      if (!token) {
+        setApplications([]);
+        setLoading(false);
+        return;
+      }
 
-    const matchesStatus =
-      status === "ALL" ||
-      application.status === status;
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await reviewService.getPendingReviews(token);
+        setApplications(data ?? []);
+      } catch (loadError) {
+        setApplications([]);
+        setError(getErrorMessage(loadError, "Unable to load reviewer queue."));
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    return matchesSearch && matchesStatus;
-  });
+    void loadApplications();
+  }, [token]);
+
+  const statusOptions = useMemo(
+    () => Array.from(new Set(applications.map((application) => application.status))).sort(),
+    [applications]
+  );
+
+  const filteredApplications = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return applications.filter((application) => {
+      const matchesSearch =
+        !query ||
+        application.reference_code.toLowerCase().includes(query) ||
+        application.applicant_name.toLowerCase().includes(query);
+
+      const matchesStatus = status === "ALL" || application.status === status;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [applications, search, status]);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">
-          Review Queue
-        </h1>
+        <h1 className="text-2xl font-bold">Review Queue</h1>
 
         <p className="mt-1 text-slate-500">
           Applications requiring human intervention.
@@ -42,7 +76,7 @@ export default function ReviewQueue() {
 
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(event) => setSearch(event.target.value)}
             placeholder="Search applicant or application ID..."
             className="w-full bg-transparent outline-none"
           />
@@ -50,86 +84,74 @@ export default function ReviewQueue() {
 
         <select
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={(event) => setStatus(event.target.value)}
           className="rounded-lg border px-4 py-2"
         >
           <option value="ALL">All Statuses</option>
-          <option value="PENDING">Pending</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="OVERRIDDEN">Overridden</option>
+          {statusOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border bg-white">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr className="text-left text-sm text-slate-500">
-                <th className="px-6 py-4">Application</th>
-                <th className="px-6 py-4">AI Prediction</th>
-                <th className="px-6 py-4">Confidence</th>
-                <th className="px-6 py-4">Risk</th>
-                <th className="px-6 py-4">Governance Trigger</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredApplications.map((application) => (
-                <tr
-                  key={application.id}
-                  className="border-t hover:bg-slate-50"
-                >
-                  <td className="px-6 py-4 font-medium">
-                    {application.id}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    {application.applicantName}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    {application.aiDecision}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    {application.probability}%
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <span className="rounded-full bg-orange-100 px-3 py-1 text-xs text-orange-700">
-                      {application.riskLevel}
-                    </span>
-                  </td>
-
-                  <td className="px-6 py-4">
-                    {application.status}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">
-                       LOW_CONFIDENCE
-                    </span>
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <button
-                        onClick={() =>
-                        navigate(`/reviews/${application.id}`)
-                      }
-                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-                    >
-                      Analyze Decision
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {loading ? (
+        <div className="flex items-center justify-center rounded-xl border bg-white p-12 text-slate-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          Loading reviewer queue...
         </div>
-      </div>
+      ) : error ? (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          <AlertCircle className="mt-0.5 h-5 w-5" />
+          <span>{error}</span>
+        </div>
+      ) : filteredApplications.length === 0 ? (
+        <div className="rounded-xl border bg-white p-8 text-center text-slate-500">
+          No applications are currently assigned to your reviewer queue.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr className="text-left text-sm text-slate-500">
+                  <th className="px-6 py-4">Application</th>
+                  <th className="px-6 py-4">Applicant</th>
+                  <th className="px-6 py-4">Workflow Stage</th>
+                  <th className="px-6 py-4">Assigned Team</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Action</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredApplications.map((application) => (
+                  <tr key={application.id} className="border-t hover:bg-slate-50">
+                    <td className="px-6 py-4 font-medium">{application.reference_code}</td>
+                    <td className="px-6 py-4">{application.applicant_name}</td>
+                    <td className="px-6 py-4">
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+                        {application.current_workflow_stage ?? "Unassigned"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">{application.assigned_team_name ?? "Unassigned"}</td>
+                    <td className="px-6 py-4">{application.status}</td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => navigate(`/reviews/${application.id}`)}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                      >
+                        Review Application
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

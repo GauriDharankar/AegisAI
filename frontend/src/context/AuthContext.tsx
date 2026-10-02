@@ -7,11 +7,13 @@ import {
 
 import type { ReactNode } from "react";
 import type { User } from "../types/auth";
+import { restoreSession, logout as logoutRequest } from "../services/authService";
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
-  login: (user: User) => void;
+  login: (user: User, token: string) => void;
   logout: () => void;
 }
 
@@ -25,47 +27,47 @@ export function AuthProvider({
   children: ReactNode;
 }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
-  // Restore login after page refresh
   useEffect(() => {
-    const storedUser = localStorage.getItem("aegis_user");
+    const restoreAuthSession = async () => {
+      const session = await restoreSession();
 
-    if (!storedUser) {
-      return;
-    }
+      if (!session) {
+        return;
+      }
 
-    try {
-      const parsedUser: User = JSON.parse(storedUser);
+      setUser(session.user);
+      setToken(session.token);
+    };
 
-      setUser(parsedUser);
-    } catch (error) {
-      console.error("Invalid stored user:", error);
-
-      localStorage.removeItem("aegis_user");
-    }
+    void restoreAuthSession();
   }, []);
 
-  // Login
-  const login = (user: User) => {
-    localStorage.setItem(
-      "aegis_user",
-      JSON.stringify(user)
-    );
+  const login = (nextUser: User, nextToken: string) => {
+    localStorage.setItem("aegis_user", JSON.stringify(nextUser));
+    localStorage.setItem("aegis_session", nextToken);
 
-    setUser(user);
+    setUser(nextUser);
+    setToken(nextToken);
   };
 
-  // Logout
   const logout = () => {
-    localStorage.removeItem("aegis_user");
+    if (token) {
+      void logoutRequest(token).catch(() => undefined);
+    }
 
+    localStorage.removeItem("aegis_user");
+    localStorage.removeItem("aegis_session");
     setUser(null);
+    setToken(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        token,
         isAuthenticated: user !== null,
         login,
         logout,

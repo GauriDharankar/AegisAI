@@ -20,11 +20,53 @@ class PolicyService:
         "!="
     }
 
+    @staticmethod
+    def _normalize_policy_input(policies):
+        """
+        Accept the legacy threshold dictionary format used by the existing
+        governance tests while preserving the standard list-of-policy-rule
+        contract expected by the rest of the application.
+        """
+
+        if isinstance(policies, dict):
+            normalized = []
+
+            for key, value in policies.items():
+                key_name = str(key)
+                lower_key = key_name.lower()
+
+                if lower_key.startswith("minimum_"):
+                    field = key_name.replace("minimum_", "", 1)
+                    operator = ">="
+                elif lower_key.startswith("maximum_"):
+                    field = key_name.replace("maximum_", "", 1)
+                    operator = "<="
+                else:
+                    field = key_name
+                    operator = "=="
+
+                normalized.append({
+                    "policy_id": key_name,
+                    "name": key_name,
+                    "field": field,
+                    "operator": operator,
+                    "value": value,
+                    "action": "REJECT",
+                    "severity": "HIGH",
+                    "enabled": True
+                })
+
+            return normalized
+
+        return policies
+
     def check_compliance(
         self,
         features: dict,
         policies: list
     ):
+
+        policies = self._normalize_policy_input(policies)
 
         checks = []
         violations = []
