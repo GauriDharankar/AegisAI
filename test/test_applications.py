@@ -1055,7 +1055,21 @@ def test_review_of_already_progressed_application_is_blocked():
     assert second_review.status_code in {400, 403}, second_review.text
 
 
-def test_authorized_final_decision_maker_can_submit_final_decision():
+def test_authorized_final_decision_maker_can_submit_final_decision(monkeypatch):
+    blockchain_payload = {}
+    monkeypatch.setattr(
+        "app.api.reviewer.submit_blockchain_audit",
+        lambda payload: (
+            blockchain_payload.update(payload)
+            or {
+                "success": True,
+                "status": "RECORDED",
+                "audit_hash": "hash-1",
+                "transaction_hash": "tx-1",
+                "audit_index": "1",
+            }
+        ),
+    )
     token, tenant_id = _register_tenant("TenantFinalDecision")
     team_ops = _create_team(token, f"Ops Final Team {uuid.uuid4().hex[:6]}")
     team_final = _create_team(token, f"Final Decision Team {uuid.uuid4().hex[:6]}")
@@ -1134,6 +1148,12 @@ def test_authorized_final_decision_maker_can_submit_final_decision():
     assert payload["decision"] == "approved"
     assert payload["application_id"] == app_id
     assert payload["workflow_stage"] == "FINAL_DECISION"
+    assert payload["blockchain"]["success"] is True
+    assert "applicant_name" not in blockchain_payload
+    assert "applicant_email" not in blockchain_payload
+    assert "income" not in blockchain_payload
+    assert "credit_score" not in blockchain_payload
+    assert "loan_amount" not in blockchain_payload
 
     refreshed = client.get(
         f"/api/v1/applications/{app_id}",
@@ -1144,7 +1164,15 @@ def test_authorized_final_decision_maker_can_submit_final_decision():
     assert refreshed.json()["current_workflow_stage"] == "FINAL_DECISION"
 
 
-def test_final_decision_completes_application_and_persists_record():
+def test_final_decision_completes_application_and_persists_record(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.reviewer.submit_blockchain_audit",
+        lambda payload: {
+            "success": False,
+            "status": "FAILED",
+            "message": "Blockchain audit service unavailable",
+        },
+    )
     token, tenant_id = _register_tenant("TenantFinalPersist")
     team_ops = _create_team(token, f"Ops Persist Team {uuid.uuid4().hex[:6]}")
     team_final = _create_team(token, f"Final Persist Team {uuid.uuid4().hex[:6]}")
@@ -1223,6 +1251,9 @@ def test_final_decision_completes_application_and_persists_record():
         logs = session.query(AuditLog).filter(AuditLog.tenant_id == tenant_id).all()
         assert any(log.action == "final_decision_submitted" for log in logs)
         assert any(log.resource_id == app_id for log in logs)
+        failed_log = next(log for log in logs if log.action == "blockchain_audit_failed")
+        assert failed_log.metadata_data["decision_id"]
+        assert failed_log.metadata_data["message"] == "Blockchain audit service unavailable"
 
 
 def test_completed_application_cannot_receive_another_final_decision():
@@ -1568,6 +1599,8 @@ def test_final_decision_audit_records_are_tenant_isolated():
         tenant_b_logs = session.query(AuditLog).filter(AuditLog.tenant_id == tenant_b_id).all()
         assert any(log.action == "final_decision_submitted" and log.resource_id == app_a_id for log in tenant_a_logs)
         assert any(log.action == "final_decision_submitted" and log.resource_id == app_b_id for log in tenant_b_logs)
+        assert any(log.action == "blockchain_audit_failed" or log.action == "blockchain_audit_recorded" for log in tenant_a_logs)
+        assert any(log.action == "blockchain_audit_failed" or log.action == "blockchain_audit_recorded" for log in tenant_b_logs)
         assert all(log.resource_id != app_b_id for log in tenant_a_logs)
         assert all(log.resource_id != app_a_id for log in tenant_b_logs)
 

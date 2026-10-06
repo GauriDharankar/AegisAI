@@ -11,6 +11,7 @@ from app.api.applications import _advance_application_to_next_stage, _record_aud
 from app.db.database import get_db
 from app.db.models import Application, AuditLog, Decision, Review, Role, User
 from app.services.auth_service import get_current_user
+from app.services.blockchain_service import submit_blockchain_audit
 
 router = APIRouter(prefix="/api/v1", tags=["Reviewer"])
 
@@ -276,6 +277,48 @@ def submit_final_decision(
     )
     db.commit()
     db.refresh(application)
+
+    governance_result = application.governance_result if isinstance(application.governance_result, dict) else {}
+    governance_decision = governance_result.get("decision")
+    decision_blockchain_payload = {
+        "application_id": application.id,
+        "tenant_id": current_user.tenant_id,
+        "decision_id": decision.id,
+        "governance_id": governance_result.get("governance_id"),
+        "final_decision": decision_value,
+        "decision_maker_id": current_user.id,
+        "workflow_stage": application.current_workflow_stage,
+        "governance_status": application.governance_status,
+        "governance_route": governance_decision.get("final_decision") if isinstance(governance_decision, dict) else None,
+    }
+    blockchain_result = submit_blockchain_audit(decision_blockchain_payload)
+    blockchain_metadata = {
+        "application_id": application.id,
+        "decision_id": decision.id,
+        "blockchain_status": blockchain_result.get("status", "FAILED"),
+        "audit_hash": blockchain_result.get("audit_hash"),
+        "transaction_hash": blockchain_result.get("transaction_hash"),
+        "audit_index": blockchain_result.get("audit_index"),
+    }
+    if blockchain_result.get("success"):
+        blockchain_action = "blockchain_audit_recorded"
+    else:
+        blockchain_action = "blockchain_audit_failed"
+        blockchain_metadata["message"] = blockchain_result.get(
+            "message",
+            "Blockchain audit service unavailable",
+        )
+    _record_audit_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user_id=current_user.id,
+        action=blockchain_action,
+        resource_type="application",
+        resource_id=application.id,
+        metadata=blockchain_metadata,
+    )
+    db.commit()
+
     return {
         "id": decision.id,
         "application_id": application.id,
@@ -285,6 +328,7 @@ def submit_final_decision(
         "workflow_stage": application.current_workflow_stage,
         "status": application.status,
         "created_at": decision.created_at.isoformat(),
+        "blockchain": blockchain_result,
     }
 
 
