@@ -63,7 +63,7 @@ export default function AdminAudit() {
             <div className="mb-4 rounded-full bg-slate-100 p-4 text-slate-700">
               <FileText size={28} />
             </div>
-            <h2 className="text-xl font-semibold text-slate-900">No audit events yet</h2>
+            <h2 className="text-xl font-semibold text-slate-900">No audit events found</h2>
             <p className="mt-2 text-sm text-slate-500">Events for this tenant will appear here as workflow activity occurs.</p>
           </div>
         ) : (

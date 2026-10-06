@@ -34,12 +34,6 @@ class RiskService:
 
             return "HIGH"
 
-        if fairness_result.get(
-            "status"
-        ) == "insufficient_data":
-
-            return "HIGH"
-
         # =====================================================
         # MODEL REJECTION
         # =====================================================

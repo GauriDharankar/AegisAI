@@ -1,13 +1,69 @@
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
+from app.api.applications import ApplicationCreateRequest, _evaluate_application
 from app.db.database import SessionLocal, migrate_sqlite_application_schema
 from app.db.models import AuditLog
 from app.main import app
+from app.services.financial_service import calculate_debt_to_income
+from app.services.governance_service import governance_service
+from app.services.policy_service import PolicyService
 
 client = TestClient(app)
+
+
+def test_debt_to_income_uses_monthly_values_and_handles_non_positive_income():
+    assert calculate_debt_to_income(10000, 60000) == pytest.approx(1 / 6)
+    assert calculate_debt_to_income(10000, 0) == 0.0
+    assert calculate_debt_to_income(10000, -60000) == 0.0
+
+
+def test_policy_evaluates_normalized_debt_to_income():
+    result = PolicyService().check_compliance(
+        features={"debt_to_income": calculate_debt_to_income(10000, 60000)},
+        policies=[
+            {
+                "policy_id": "DTI-040",
+                "name": "Debt-to-income limit",
+                "field": "debt_to_income",
+                "operator": "<=",
+                "value": 0.40,
+                "action": "REVIEW",
+                "severity": "HIGH",
+            }
+        ],
+    )
+
+    assert result["checks"][0]["actual"] == pytest.approx(0.1667, abs=0.0001)
+    assert result["checks"][0]["status"] == "pass"
+
+
+def test_governance_receives_normalized_debt_to_income(monkeypatch):
+    captured = {}
+    _, tenant_id = _register_tenant("TenantDtiGovernance")
+
+    def capture_evaluation(**kwargs):
+        captured.update(kwargs)
+        return {"decision": {"final_decision": "HUMAN_REVIEW"}}
+
+    monkeypatch.setattr(governance_service, "evaluate", capture_evaluation)
+
+    with SessionLocal() as db:
+        _evaluate_application(
+            db,
+            tenant_id,
+            ApplicationCreateRequest(
+                reference_code="DTI-GOVERNANCE",
+                applicant_name="DTI Applicant",
+                monthly_income=60000,
+                existing_monthly_emi=10000,
+            ),
+        )
+
+    assert captured["features"]["debt_to_income"] == pytest.approx(0.1667, abs=0.0001)
 
 
 def _unique_org_name(prefix: str = "App Org") -> str:
@@ -151,6 +207,34 @@ def test_application_is_persisted_in_sqlite():
     assert app_id in app_ids
 
 
+def test_application_api_and_persistence_use_normalized_dti():
+    token, tenant_id = _register_tenant("TenantDti")
+
+    response = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "reference_code": "APP-DTI-001",
+            "applicant_name": "DTI Example",
+            "monthly_income": 60000,
+            "existing_monthly_emi": 10000,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["debt_to_income"] == pytest.approx(0.1667, abs=0.0001)
+
+    with SessionLocal() as db:
+        from app.db.models import Application
+
+        application = db.query(Application).filter_by(
+            id=payload["id"],
+            tenant_id=tenant_id,
+        ).one()
+        assert application.debt_to_income == pytest.approx(0.1667, abs=0.0001)
+
+
 def test_authenticated_tenant_can_list_its_applications():
     token, _ = _register_tenant("TenantList")
     team_id = _create_team(token, "List Team")
@@ -173,6 +257,35 @@ def test_authenticated_tenant_can_list_its_applications():
     assert response.status_code == 200, response.text
     assert len(response.json()) == 1
     assert response.json()[0]["reference_code"] == "APP-1003"
+
+
+def test_dashboard_application_source_is_tenant_scoped_and_returns_review_status():
+    token_a, _ = _register_tenant("DashboardTenantA")
+    token_b, _ = _register_tenant("DashboardTenantB")
+
+    created = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": f"Bearer {token_a}"},
+        json={
+            "reference_code": "APP-DASHBOARD-A",
+            "applicant_name": "Dashboard Applicant A",
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    tenant_a_applications = client.get(
+        "/api/v1/applications",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    tenant_b_applications = client.get(
+        "/api/v1/applications",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+
+    assert tenant_a_applications.status_code == 200, tenant_a_applications.text
+    assert tenant_b_applications.status_code == 200, tenant_b_applications.text
+    assert tenant_a_applications.json()[0]["status"] == "in_review"
+    assert tenant_b_applications.json() == []
 
 
 def test_authenticated_tenant_can_retrieve_its_application():

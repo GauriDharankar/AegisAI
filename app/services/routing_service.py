@@ -142,7 +142,13 @@ class RoutingService:
         # ---------------------------------------------------------
         fairness_status = fairness_result.get("status")
 
-        if fairness_status == "insufficient_data":
+        auto_config = configuration.get("auto_approve", {})
+        require_fairness_pass = auto_config.get(
+            "require_fairness_pass",
+            configuration.get("require_fairness_pass", True),
+        )
+
+        if fairness_status == "insufficient_data" and require_fairness_pass:
             return {
                 "route": "HUMAN_REVIEW",
                 "reason_code": "INSUFFICIENT_FAIRNESS_DATA",
@@ -279,7 +285,8 @@ class RoutingService:
                 else True
             )
 
-            fairness_ok = (
+            fairness_status = fairness_result.get("status")
+            fairness_ok = fairness_status != "violation" and (
                 fairness_result.get("passed", False)
                 if require_fairness_pass
                 else True

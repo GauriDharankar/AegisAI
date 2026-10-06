@@ -17,6 +17,7 @@ export default function ApplicationReview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [submissionSuccess, setSubmissionSuccess] = useState<string | null>(null);
   const [decision, setDecision] = useState<"approved" | "rejected" | "pending">("pending");
   const [comments, setComments] = useState("");
   const [finalDecision, setFinalDecision] = useState<"approved" | "rejected">("approved");
@@ -53,6 +54,7 @@ export default function ApplicationReview() {
 
     setSubmitting(true);
     setSubmissionError(null);
+    setSubmissionSuccess(null);
 
     try {
       if (application?.current_workflow_stage === "FINAL_DECISION") {
@@ -71,11 +73,17 @@ export default function ApplicationReview() {
         showToast("Review submitted successfully");
       }
 
-      const refreshed = await reviewService.getApplication(token, id);
-      setApplication(refreshed);
+      setSubmissionSuccess("Review submitted successfully.");
       setComments("");
       setDecision("pending");
       setFinalDecision("approved");
+
+      try {
+        const refreshed = await reviewService.getApplication(token, id);
+        setApplication(refreshed);
+      } catch {
+        navigate("/reviews", { replace: true });
+      }
     } catch (submitError) {
       setSubmissionError(getErrorMessage(submitError, "Review submission failed."));
     } finally {
@@ -205,6 +213,12 @@ export default function ApplicationReview() {
           <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <AlertCircle className="mt-0.5 h-4 w-4" />
             <span>{submissionError}</span>
+          </div>
+        )}
+
+        {submissionSuccess && (
+          <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+            {submissionSuccess}
           </div>
         )}
 

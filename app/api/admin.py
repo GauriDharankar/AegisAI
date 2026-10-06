@@ -19,6 +19,7 @@ from app.db.models import (
     User,
     WorkflowStage,
 )
+from app.schemas.governance import AutoApproveConfig
 from app.services.auth_service import get_current_user, hash_password, normalize_email, validate_password
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Tenant Admin"])
@@ -98,6 +99,22 @@ class WorkflowRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2)
     status: str = "active"
     stages: list[WorkflowStageRequest] | None = None
+
+
+class TenantConfigurationRequest(BaseModel):
+    auto_approve: AutoApproveConfig
+
+
+def _default_auto_approve_configuration() -> dict[str, Any]:
+    return AutoApproveConfig().model_dump()
+
+
+def _tenant_configuration(tenant: Tenant) -> dict[str, Any]:
+    configuration = dict(tenant.governance_configuration or {})
+    auto_approve = dict(configuration.get("auto_approve") or {})
+    defaults = _default_auto_approve_configuration()
+    defaults.update(auto_approve)
+    return {"auto_approve": defaults}
 
 
 def _canonicalize_responsibility(value: str | None) -> str | None:
@@ -375,6 +392,27 @@ def get_organization(
     }
 
 
+@router.get("/configuration")
+def get_configuration(
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+) -> dict[str, Any]:
+    _, tenant = admin_context
+    return {"tenant_id": tenant.id, **_tenant_configuration(tenant)}
+
+
+@router.put("/configuration")
+def update_configuration(
+    payload: TenantConfigurationRequest,
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _, tenant = admin_context
+    tenant.governance_configuration = {"auto_approve": payload.auto_approve.model_dump()}
+    db.commit()
+    db.refresh(tenant)
+    return {"tenant_id": tenant.id, **_tenant_configuration(tenant)}
+
+
 @router.put("/organization")
 def update_organization(
     payload: OrganizationUpdateRequest,
@@ -639,10 +677,10 @@ def list_audit_logs(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    _, tenant = admin_context
+    current_user, _ = admin_context
     logs = db.execute(
         select(AuditLog)
-        .where(AuditLog.tenant_id == tenant.id)
+        .where(AuditLog.tenant_id == current_user.tenant_id)
         .order_by(AuditLog.timestamp.desc())
         .limit(limit)
     ).scalars().all()

@@ -72,23 +72,25 @@ const mapLevel = (role: string): 1 | 2 | 3 | 4 => {
   return 1;
 };
 
+const mapApiUser = (apiUser: AuthApiUser): User => ({
+  id: apiUser.id,
+  name: apiUser.name,
+  email: apiUser.email,
+  role: mapRole(apiUser.role),
+  level: (apiUser.level as 1 | 2 | 3 | 4) || mapLevel(apiUser.role),
+  tenant_id: apiUser.tenant_id,
+  tenant_name: apiUser.tenant_name,
+  responsibilities: apiUser.responsibilities,
+  teams: apiUser.teams,
+});
+
 export const login = async (payload: AuthLoginPayload) => {
   const response = await api.post("/api/v1/auth/login", payload);
   const apiUser = response.data.user as AuthApiUser;
 
   return {
     ...response.data,
-    user: {
-      id: apiUser.id,
-      name: apiUser.name,
-      email: apiUser.email,
-      role: mapRole(apiUser.role),
-      level: (apiUser.level as 1 | 2 | 3 | 4) || mapLevel(apiUser.role),
-      tenant_id: apiUser.tenant_id,
-      tenant_name: apiUser.tenant_name,
-      responsibilities: apiUser.responsibilities,
-      teams: apiUser.teams,
-    } satisfies User,
+    user: mapApiUser(apiUser),
   } as AuthSession;
 };
 
@@ -98,18 +100,33 @@ export const register = async (payload: AuthRegisterPayload) => {
 
   return {
     ...response.data,
-    user: {
-      id: apiUser.id,
-      name: apiUser.name,
-      email: apiUser.email,
-      role: mapRole(apiUser.role),
-      level: (apiUser.level as 1 | 2 | 3 | 4) || mapLevel(apiUser.role),
-      tenant_id: apiUser.tenant_id,
-      tenant_name: apiUser.tenant_name,
-      responsibilities: apiUser.responsibilities,
-      teams: apiUser.teams,
-    } satisfies User,
+    user: mapApiUser(apiUser),
   } as AuthSession;
+};
+
+export const refreshSession = async (token: string): Promise<AuthSession> => {
+  const response = await api.post(
+    "/api/v1/auth/refresh",
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return {
+    ...response.data,
+    user: mapApiUser(response.data.user as AuthApiUser),
+  } as AuthSession;
+};
+
+export const getTokenExpiry = (token: string): number | null => {
+  try {
+    const payloadSegment = token.split(".")[0];
+    const normalized = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(
+      atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="))
+    ) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
 };
 
 export const logout = async (token: string) => {
@@ -125,8 +142,8 @@ export const logout = async (token: string) => {
 };
 
 export const restoreSession = async (): Promise<AuthSession | null> => {
-  const token = localStorage.getItem("aegis_session");
-  const storedUser = localStorage.getItem("aegis_user");
+  const token = sessionStorage.getItem("aegis_session");
+  const storedUser = sessionStorage.getItem("aegis_user");
 
   if (!token || !storedUser) {
     return null;
@@ -137,8 +154,8 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
   try {
     cachedUser = JSON.parse(storedUser) as User;
   } catch {
-    localStorage.removeItem("aegis_session");
-    localStorage.removeItem("aegis_user");
+    sessionStorage.removeItem("aegis_session");
+    sessionStorage.removeItem("aegis_user");
     return null;
   }
 
@@ -150,19 +167,9 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
     });
 
     const apiUser = response.data as AuthApiUser;
-    const user: User = {
-      id: apiUser.id,
-      name: apiUser.name,
-      email: apiUser.email,
-      role: mapRole(apiUser.role),
-      level: (apiUser.level as 1 | 2 | 3 | 4) || mapLevel(apiUser.role),
-      tenant_id: apiUser.tenant_id,
-      tenant_name: apiUser.tenant_name,
-      responsibilities: apiUser.responsibilities,
-      teams: apiUser.teams,
-    };
+    const user = mapApiUser(apiUser);
 
-    localStorage.setItem("aegis_user", JSON.stringify(user));
+    sessionStorage.setItem("aegis_user", JSON.stringify(user));
 
     return {
       token,
@@ -170,8 +177,8 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
     };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
-      localStorage.removeItem("aegis_session");
-      localStorage.removeItem("aegis_user");
+      sessionStorage.removeItem("aegis_session");
+      sessionStorage.removeItem("aegis_user");
       return null;
     }
 
@@ -185,6 +192,8 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
 export default {
   login,
   register,
+  refreshSession,
+  getTokenExpiry,
   logout,
   restoreSession,
 };

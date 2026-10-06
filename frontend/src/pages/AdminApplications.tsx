@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, FolderOpen, Loader2, Plus } from "lucide-react";
+import { AlertCircle, ExternalLink, FolderOpen, Loader2, Plus } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { getTeams } from "../services/adminService";
@@ -55,8 +55,10 @@ const emptyForm = {
   credit_score: "700",
   existing_monthly_emi: "15000",
 };
+import { useNavigate } from "react-router-dom";
 
 export default function AdminApplications() {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const { showToast } = useToast();
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
@@ -351,6 +353,14 @@ export default function AdminApplications() {
                     <span className="font-medium text-slate-700">Created:</span> {new Date(application.created_at).toLocaleString()}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/admin/applications/${application.id}`)}
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  <ExternalLink size={16} />
+                  View Details
+                </button>
               </div>
             ))}
           </div>

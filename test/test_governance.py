@@ -183,6 +183,64 @@ def test_auto_approval_normalizes_eligible_loan_types():
     assert result["route"] == "AUTO_APPROVE"
 
 
+def test_insufficient_fairness_is_allowed_when_fairness_pass_is_disabled():
+    data = base_request()
+    data["fairness_data"] = {"predictions": [], "protected_groups": []}
+    data["configuration"] = {
+        "auto_approve": {
+            "enabled": True,
+            "minimum_probability": 0.85,
+            "maximum_risk": "LOW",
+            "require_policy_compliance": True,
+            "require_fairness_pass": False,
+        }
+    }
+
+    result = service.evaluate(**data)
+
+    assert result["fairness"]["status"] == "insufficient_data"
+    assert result["risk"]["level"] == "LOW"
+    assert result["decision"]["final_decision"] == "AUTO_APPROVE"
+
+
+def test_insufficient_fairness_requires_human_review_when_enabled():
+    data = base_request()
+    data["fairness_data"] = {"predictions": [], "protected_groups": []}
+    data["configuration"] = {
+        "auto_approve": {
+            "enabled": True,
+            "minimum_probability": 0.85,
+            "maximum_risk": "LOW",
+            "require_policy_compliance": True,
+            "require_fairness_pass": True,
+        }
+    }
+
+    result = service.evaluate(**data)
+
+    assert result["risk"]["level"] == "LOW"
+    assert result["decision"]["final_decision"] == "HUMAN_REVIEW"
+
+
+def test_fairness_violation_blocks_auto_approval_even_when_disabled():
+    inputs = _routing_inputs("personal loan")
+    inputs["fairness_result"] = {"status": "violation", "passed": False}
+    inputs["configuration"]["auto_approve"]["require_fairness_pass"] = False
+
+    result = RoutingService().route_decision(**inputs)
+
+    assert result["route"] == "HUMAN_REVIEW"
+
+
+def test_high_risk_blocks_auto_approval():
+    inputs = _routing_inputs("personal loan")
+    inputs["risk_level"] = "HIGH"
+
+    result = RoutingService().route_decision(**inputs)
+
+    assert result["route"] == "HUMAN_REVIEW"
+
+
 def test_ineligible_loan_type_requires_human_review():
     result = RoutingService().route_decision(**_routing_inputs("mortgage"))
 

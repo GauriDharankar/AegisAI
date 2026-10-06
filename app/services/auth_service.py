@@ -19,7 +19,6 @@ from app.db.models import Permission, Role, Tenant, Team, User, WorkflowStage, G
 
 AUTH_SECRET = os.getenv("AEGISAI_AUTH_SECRET", "aegisai-local-dev-secret-change-me")
 SESSION_TTL_SECONDS = 60 * 60 * 8
-SESSION_STORE: dict[str, str] = {}
 
 
 def hash_password(password: str) -> str:
@@ -85,9 +84,7 @@ def create_session_token(user: User, role_name: str | None = None) -> str:
         "exp": int(time.time()) + SESSION_TTL_SECONDS,
     }
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    token = f"{_b64url_encode(payload_json.encode('utf-8'))}.{_token_signature(payload_json)}"
-    SESSION_STORE[token] = user.id
-    return token
+    return f"{_b64url_encode(payload_json.encode('utf-8'))}.{_token_signature(payload_json)}"
 
 
 def verify_session_token(token: str) -> dict[str, Any]:
@@ -123,9 +120,8 @@ def verify_session_token(token: str) -> dict[str, Any]:
 
 
 def invalidate_session_token(token: str | None) -> None:
-    if not token:
-        return
-    SESSION_STORE.pop(token, None)
+    # Signed access tokens are stateless; client logout clears the token.
+    return None
 
 
 def get_current_user(
@@ -140,9 +136,6 @@ def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session token.")
-
-    if SESSION_STORE.get(token) != user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer valid.")
 
     user = db.get(User, user_id)
     if user is None or user.status != "active":

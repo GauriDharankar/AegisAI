@@ -152,7 +152,7 @@ def test_authenticated_user_receives_correct_tenant_context():
     assert payload["tenant_name"] == org_name
 
 
-def test_logout_invalidates_session():
+def test_users_have_independent_sessions_and_logout_does_not_affect_other_tokens():
     org_name = _unique_org_name("Logout")
     email = f"logout_{uuid.uuid4().hex[:8]}@example.com"
     password = "SecurePass123"
@@ -170,6 +170,20 @@ def test_logout_invalidates_session():
     assert register_response.status_code == 200, register_response.text
     token = register_response.json()["token"]
 
+    other_email = f"logout_other_{uuid.uuid4().hex[:8]}@example.com"
+    other_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": _unique_org_name("Logout Other"),
+            "name": "Other User",
+            "email": other_email,
+            "password": password,
+            "confirm_password": password,
+        },
+    )
+    assert other_response.status_code == 200, other_response.text
+    other_token = other_response.json()["token"]
+
     logout_response = client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": f"Bearer {token}"},
@@ -180,7 +194,71 @@ def test_logout_invalidates_session():
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert me_response.status_code == 401, me_response.text
+    assert me_response.status_code == 200, me_response.text
+
+    other_me_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert other_me_response.status_code == 200, other_me_response.text
+
+
+def test_refresh_returns_current_role_and_tenant():
+    org_name = _unique_org_name("Refresh")
+    email = f"refresh_{uuid.uuid4().hex[:8]}@example.com"
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": org_name,
+            "name": "Refresh User",
+            "email": email,
+            "password": "SecurePass123",
+            "confirm_password": "SecurePass123",
+        },
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["token"]
+
+    refreshed = client.post(
+        "/api/v1/auth/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["user"]["email"] == email.lower()
+    assert refreshed.json()["user"]["role"] == "Tenant Admin"
+    assert refreshed.json()["user"]["tenant_name"] == org_name
+
+    refreshed_me = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {refreshed.json()['token']}"},
+    )
+    assert refreshed_me.status_code == 200, refreshed_me.text
+    assert refreshed_me.json()["tenant_name"] == org_name
+
+
+def test_expired_and_invalid_tokens_are_rejected(monkeypatch):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": _unique_org_name("Expired"),
+            "name": "Expired User",
+            "email": f"expired_{uuid.uuid4().hex[:8]}@example.com",
+            "password": "SecurePass123",
+            "confirm_password": "SecurePass123",
+        },
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["token"]
+
+    from app.services import auth_service
+
+    current_time = auth_service.time.time()
+    monkeypatch.setattr(auth_service.time, "time", lambda: current_time + auth_service.SESSION_TTL_SECONDS + 1)
+    expired = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert expired.status_code == 401, expired.text
+
+    invalid = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer invalid-token"})
+    assert invalid.status_code == 401, invalid.text
 
 
 def test_password_is_hashed_not_plaintext():

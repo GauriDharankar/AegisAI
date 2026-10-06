@@ -29,6 +29,7 @@ import AdminUsers from "./pages/AdminUsers";
 import AdminResponsibilities from "./pages/AdminResponsibilities";
 import AdminWorkflow from "./pages/AdminWorkflow.tsx";
 import AdminApplications from "./pages/AdminApplications";
+import AdminApplicationDetails from "./pages/AdminApplicationDetails";
 import AdminAudit from "./pages/AdminAudit";
 import AdminSettings from "./pages/AdminSettings";
 
@@ -281,12 +282,22 @@ function App() {
               </ProtectedRoute>
             }
           />
+import AdminApplicationDetails from "./pages/AdminApplicationDetails";
 
           <Route
             path="admin/applications"
             element={
               <ProtectedRoute allowedRoles={["MANAGER"]}>
                 <AdminApplications />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="admin/applications/:id"
+            element={
+              <ProtectedRoute allowedRoles={["MANAGER"]}>
+                <AdminApplicationDetails />
               </ProtectedRoute>
             }
           />

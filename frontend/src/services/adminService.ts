@@ -8,6 +8,31 @@ export async function getOrganization(token: string) {
   });
 }
 
+export async function getConfiguration(token: string) {
+  return api.get("/api/v1/admin/configuration", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function updateConfiguration(token: string, payload: {
+  auto_approve: {
+    enabled: boolean;
+    minimum_probability: number;
+    maximum_risk: "LOW" | "MEDIUM" | "HIGH";
+    eligible_loan_types: string[];
+    require_policy_compliance: boolean;
+    require_fairness_pass: boolean;
+  };
+}) {
+  return api.put("/api/v1/admin/configuration", payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export async function updateOrganization(
   token: string,
   payload: { organization_name?: string; status?: string }
@@ -73,6 +98,14 @@ export async function removeUserTeam(token: string, userId: string, teamId: stri
 
 export async function getWorkflow(token: string) {
   return api.get("/api/v1/admin/workflow", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function getApplication(token: string, applicationId: string) {
+  return api.get(`/api/v1/applications/${applicationId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

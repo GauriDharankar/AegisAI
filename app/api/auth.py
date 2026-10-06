@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import AuditLog, Role, TeamMember, Tenant, User
 from app.services.auth_service import (
-    SESSION_STORE,
     create_session_token,
     create_tenant_admin_user,
     get_current_tenant,
@@ -174,6 +173,31 @@ def logout(
 
     invalidate_session_token(token)
     return {"message": "Logged out successfully."}
+
+
+@router.post("/refresh")
+def refresh_session(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    role = db.get(Role, current_user.primary_role_id)
+    token = create_session_token(current_user, role_name=role.name if role else "Tenant Admin")
+    tenant = db.get(Tenant, current_user.tenant_id)
+    assignments = _serialize_user_assignments(db, current_user)
+    return {
+        "message": "Session refreshed.",
+        "token": token,
+        "user": {
+            "id": current_user.id,
+            "name": current_user.name,
+            "email": current_user.email,
+            "role": role.name if role else "Tenant Admin",
+            "tenant_id": current_user.tenant_id,
+            "tenant_name": tenant.organization_name if tenant else None,
+            "level": 4 if (role and role.name == "Tenant Admin") else 2,
+            **assignments,
+        },
+    }
 
 
 @router.get("/me")

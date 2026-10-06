@@ -7,7 +7,12 @@ import {
 
 import type { ReactNode } from "react";
 import type { User } from "../types/auth";
-import { restoreSession, logout as logoutRequest } from "../services/authService";
+import {
+  getTokenExpiry,
+  logout as logoutRequest,
+  refreshSession,
+  restoreSession,
+} from "../services/authService";
 
 interface AuthContextType {
   user: User | null;
@@ -31,6 +36,16 @@ export function AuthProvider({
   const [token, setToken] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
+  const clearExpiredSession = () => {
+    sessionStorage.removeItem("aegis_user");
+    sessionStorage.removeItem("aegis_session");
+    localStorage.removeItem("aegis_user");
+    localStorage.removeItem("aegis_session");
+    setUser(null);
+    setToken(null);
+    window.location.assign("/login");
+  };
+
   useEffect(() => {
     const restoreAuthSession = async () => {
       const session = await restoreSession();
@@ -48,9 +63,41 @@ export function AuthProvider({
     void restoreAuthSession();
   }, []);
 
+  useEffect(() => {
+    window.addEventListener("aegis-auth-expired", clearExpiredSession);
+    return () => window.removeEventListener("aegis-auth-expired", clearExpiredSession);
+  }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const expiry = getTokenExpiry(token);
+    if (!expiry) {
+      return;
+    }
+
+    const refreshDelay = Math.max(expiry - Date.now() - 60_000, 1_000);
+    const timer = window.setTimeout(() => {
+      void refreshSession(token)
+        .then((session) => {
+          sessionStorage.setItem("aegis_user", JSON.stringify(session.user));
+          sessionStorage.setItem("aegis_session", session.token);
+          setUser(session.user);
+          setToken(session.token);
+        })
+        .catch(() => clearExpiredSession());
+    }, refreshDelay);
+
+    return () => window.clearTimeout(timer);
+  }, [token]);
+
   const login = (nextUser: User, nextToken: string) => {
-    localStorage.setItem("aegis_user", JSON.stringify(nextUser));
-    localStorage.setItem("aegis_session", nextToken);
+    sessionStorage.setItem("aegis_user", JSON.stringify(nextUser));
+    sessionStorage.setItem("aegis_session", nextToken);
+    localStorage.removeItem("aegis_user");
+    localStorage.removeItem("aegis_session");
 
     setUser(nextUser);
     setToken(nextToken);
@@ -61,6 +108,8 @@ export function AuthProvider({
       void logoutRequest(token).catch(() => undefined);
     }
 
+    sessionStorage.removeItem("aegis_user");
+    sessionStorage.removeItem("aegis_session");
     localStorage.removeItem("aegis_user");
     localStorage.removeItem("aegis_session");
     setUser(null);

@@ -1,29 +1,57 @@
-import {
-  ClipboardCheck,
-  CheckCircle,
-  XCircle,
-  ShieldAlert,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertCircle, ClipboardCheck, CheckCircle, XCircle, ShieldAlert } from "lucide-react";
 
+import { useAuth } from "../context/AuthContext";
 import StatCard from "../components/StatCard";
-import { applications, biasAlerts } from "../data/mockData";
+import api from "../services/api";
+import { getErrorMessage } from "../services/errorMessage";
+
+interface DashboardApplication {
+  id: string;
+  applicant_name: string;
+  reference_code: string;
+  status: string;
+  created_at: string;
+  governance_result?: {
+    fairness?: {
+      status?: string;
+      message?: string;
+    };
+  } | null;
+}
 
 export default function Dashboard() {
-  const pending = applications.filter(
-    (app) => app.status === "PENDING"
-  ).length;
+  const { token } = useAuth();
+  const [applications, setApplications] = useState<DashboardApplication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const approved = applications.filter(
-    (app) => app.status === "APPROVED"
-  ).length;
+  useEffect(() => {
+    if (!token) {
+      setApplications([]);
+      setLoading(false);
+      return;
+    }
 
-  const rejected = applications.filter(
-    (app) => app.status === "REJECTED"
-  ).length;
+    setLoading(true);
+    setError(null);
+    void api.get<DashboardApplication[]>("/api/v1/applications", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((applicationsResponse) => {
+        setApplications(applicationsResponse.data ?? []);
+      })
+      .catch((loadError) => {
+        setApplications([]);
+        setError(getErrorMessage(loadError, "Unable to load dashboard data."));
+      })
+      .finally(() => setLoading(false));
+  }, [token]);
 
-  const alerts = biasAlerts.filter(
-    (alert) => alert.status === "OPEN"
-  ).length;
+  const pending = applications.filter((application) => ["new", "in_review", "pending"].includes(application.status.toLowerCase())).length;
+  const approved = applications.filter((application) => ["approved", "completed"].includes(application.status.toLowerCase())).length;
+  const rejected = applications.filter((application) => application.status.toLowerCase() === "rejected").length;
+  const activeAlerts = applications.filter((application) => application.governance_result?.fairness?.status?.toLowerCase() === "violation");
 
   return (
     <div className="space-y-8">
@@ -37,7 +65,18 @@ export default function Dashboard() {
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle size={16} />
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="rounded-xl border bg-white p-8 text-slate-600">Loading dashboard...</div>
+      ) : (
+      <>
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Pending Reviews"
           value={pending}
@@ -61,7 +100,7 @@ export default function Dashboard() {
 
         <StatCard
           title="Bias Alerts"
-          value={alerts}
+          value={activeAlerts.length}
           description="Active governance alerts"
           icon={<ShieldAlert />}
         />
@@ -74,18 +113,20 @@ export default function Dashboard() {
           </h2>
 
           <div className="space-y-4">
-            {applications.slice(0, 4).map((application) => (
+            {applications.length === 0 ? (
+              <p className="text-sm text-slate-500">No recent reviews</p>
+            ) : applications.slice(0, 4).map((application) => (
               <div
                 key={application.id}
                 className="flex items-center justify-between border-b pb-4"
               >
                 <div>
                   <p className="font-medium">
-                    {application.applicantName}
+                    {application.applicant_name}
                   </p>
 
                   <p className="text-sm text-slate-500">
-                    {application.id}
+                    {application.reference_code}
                   </p>
                 </div>
 
@@ -103,23 +144,27 @@ export default function Dashboard() {
           </h2>
 
           <div className="space-y-4">
-            {biasAlerts.map((alert) => (
+            {activeAlerts.length === 0 ? (
+              <p className="text-sm text-slate-500">No active alerts</p>
+            ) : activeAlerts.map((application) => (
               <div
-                key={alert.id}
+                key={application.id}
                 className="rounded-lg bg-red-50 p-4"
               >
                 <p className="font-medium text-red-800">
-                  {alert.title}
+                  Fairness violation
                 </p>
 
                 <p className="mt-1 text-sm text-red-600">
-                  {alert.description}
+                  {application.reference_code}: {application.governance_result?.fairness?.message ?? "Fairness threshold exceeded."}
                 </p>
               </div>
             ))}
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

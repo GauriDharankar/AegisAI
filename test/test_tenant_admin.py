@@ -277,6 +277,29 @@ def test_admin_audit_logs_are_tenant_scoped():
     assert any(item["action"] == "organization_registered" for item in audit_a.json())
 
 
+def test_admin_audit_logs_never_return_another_tenant_event():
+    tenant_a = _register_tenant("AuditIsolationA")
+    tenant_b = _register_tenant("AuditIsolationB")
+
+    update = client.put(
+        "/api/v1/admin/organization",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"organization_name": "Tenant A Only", "status": "active"},
+    )
+    assert update.status_code == 200, update.text
+
+    audit_a = client.get("/api/v1/admin/audit", headers=_auth_headers(tenant_a["token"]))
+    audit_b = client.get("/api/v1/admin/audit", headers=_auth_headers(tenant_b["token"]))
+    assert audit_a.status_code == 200, audit_a.text
+    assert audit_b.status_code == 200, audit_b.text
+
+    audit_a_actions = {item["action"] for item in audit_a.json()}
+    assert "organization_registered" in audit_a_actions
+    assert all(item["tenant_id"] == tenant_a["tenant"]["id"] for item in audit_a.json())
+    assert all(item["tenant_id"] == tenant_b["tenant"]["id"] for item in audit_b.json())
+    assert all(item["resource_id"] != tenant_a["tenant"]["id"] for item in audit_b.json())
+
+
 def test_reviewer_and_unauthenticated_users_are_rejected_for_admin_routes():
     tenant = _register_tenant("Review")
 

@@ -54,6 +54,7 @@ class Tenant(Base):
         onupdate=utcnow,
         nullable=False,
     )
+    governance_configuration: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     roles: Mapped[list["Role"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")

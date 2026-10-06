@@ -61,7 +61,7 @@ export default function Login({ initialMode = "login" }: { initialMode?: "login"
       login(loggedInUser, session.token);
 
       if (rememberMe) {
-        localStorage.setItem("aegis_session", session.token);
+        sessionStorage.setItem("aegis_session", session.token);
       }
 
       navigate("/dashboard", { replace: true });

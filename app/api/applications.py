@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Application, AuditLog, GovernanceWorkflow, Policy, PolicyVersion, Team, Tenant, User, WorkflowStage
 from app.services.auth_service import get_current_user
+from app.services.configuration_service import get_tenant_governance_configuration
+from app.services.financial_service import calculate_debt_to_income
 from app.services.governance_service import governance_service
 from app.services.model_service import loan_model
 
@@ -63,8 +65,17 @@ def _tenant_policy_rules(db: Session, tenant_id: str) -> list[dict[str, Any]]:
     return rules
 
 
-def _evaluate_application(db: Session, tenant_id: str, payload: ApplicationCreateRequest) -> dict[str, Any]:
-    debt_to_income = payload.existing_monthly_emi * 12 / payload.monthly_income
+def _evaluate_application(
+    db: Session,
+    tenant_id: str,
+    payload: ApplicationCreateRequest,
+    debt_to_income: float | None = None,
+) -> dict[str, Any]:
+    if debt_to_income is None:
+        debt_to_income = calculate_debt_to_income(
+            payload.existing_monthly_emi,
+            payload.monthly_income,
+        )
     features = {
         "income": payload.monthly_income * 12,
         "credit_score": payload.credit_score,
@@ -73,6 +84,10 @@ def _evaluate_application(db: Session, tenant_id: str, payload: ApplicationCreat
         "employment_years": payload.employment_years,
     }
     prediction = loan_model.predict(features)
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
+
     return governance_service.evaluate(
         tenant_id=tenant_id,
         features=features,
@@ -81,7 +96,7 @@ def _evaluate_application(db: Session, tenant_id: str, payload: ApplicationCreat
         policies=_tenant_policy_rules(db, tenant_id),
         configuration={
             "risk": {"enabled": True},
-            "auto_approve": {"enabled": False},
+            **get_tenant_governance_configuration(tenant),
         },
             loan_type=payload.loan_type,
     )
@@ -281,7 +296,16 @@ def create_application(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Application reference already exists for this tenant.")
 
     workflow, first_stage = _get_active_tenant_workflow(db, tenant_id)
-    governance_result = _evaluate_application(db, tenant_id, payload)
+    debt_to_income = calculate_debt_to_income(
+        payload.existing_monthly_emi,
+        payload.monthly_income,
+    )
+    governance_result = _evaluate_application(
+        db,
+        tenant_id,
+        payload,
+        debt_to_income=debt_to_income,
+    )
     route = governance_result["decision"]["final_decision"]
     governance_status = governance_result["governance_status"]
     assigned_team_id = first_stage.team_id if first_stage.team_id is not None else _validate_team_for_tenant(db, tenant_id, payload.team_id)
@@ -307,7 +331,7 @@ def create_application(
         employment_years=payload.employment_years,
         credit_score=payload.credit_score,
         existing_monthly_emi=payload.existing_monthly_emi,
-        debt_to_income=payload.existing_monthly_emi * 12 / payload.monthly_income,
+        debt_to_income=debt_to_income,
         governance_status=governance_status,
         governance_result=governance_result,
     )

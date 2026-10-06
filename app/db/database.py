@@ -30,6 +30,10 @@ MIGRATION_COLUMNS = [
     ("governance_result", "JSON", None),
 ]
 
+TENANT_MIGRATION_COLUMNS = [
+    ("governance_configuration", "JSON", "{}"),
+]
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 raw_db_path = os.getenv("AEGISAI_DB_PATH", str(BASE_DIR / "aegisai.db"))
 if raw_db_path and raw_db_path.strip().lower() == ":memory:":
@@ -146,6 +150,28 @@ def migrate_sqlite_application_schema(target_engine=None) -> None:
             )
 
 
+def migrate_sqlite_tenant_schema(target_engine=None) -> None:
+    bind = target_engine or engine
+    with bind.begin() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "tenants" not in tables:
+            return
+
+        existing_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(tenants)").fetchall()
+        }
+        for column_name, column_type, default_value in TENANT_MIGRATION_COLUMNS:
+            if column_name in existing_columns:
+                continue
+            connection.exec_driver_sql(
+                f"ALTER TABLE tenants ADD COLUMN {column_name} {column_type} NOT NULL DEFAULT '{default_value}'"
+            )
+
+
 def init_db() -> None:
     from app.db.models import (  # noqa: F401
         Application,
@@ -176,3 +202,4 @@ def init_db() -> None:
         Base.metadata.create_all(bind=engine)
 
     migrate_sqlite_application_schema(engine)
+    migrate_sqlite_tenant_schema(engine)
