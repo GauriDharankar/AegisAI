@@ -183,6 +183,86 @@ def test_team_membership_and_status_controls_work():
     assert login_attempt.status_code == 401, login_attempt.text
 
 
+def test_admin_cannot_deactivate_themselves_and_inactive_users_cannot_log_in():
+    tenant = _register_tenant("SelfProtect")
+
+    self_deactivate = client.patch(
+        f"/api/v1/admin/users/{tenant['user']['id']}/status",
+        headers=_auth_headers(tenant["token"]),
+        json={"status": "inactive"},
+    )
+    assert self_deactivate.status_code == 400, self_deactivate.text
+    assert "Cannot deactivate your own currently active administrator account." in self_deactivate.json()["detail"]
+
+    user = client.post(
+        "/api/v1/admin/users",
+        headers=_auth_headers(tenant["token"]),
+        json={
+            "name": "Inactive User",
+            "email": f"inactive_{uuid.uuid4().hex[:8]}@example.com",
+            "password": "SecurePass123",
+            "status": "active",
+        },
+    )
+    assert user.status_code == 200, user.text
+    member_id = user.json()["id"]
+
+    deactivate_member = client.patch(
+        f"/api/v1/admin/users/{member_id}/status",
+        headers=_auth_headers(tenant["token"]),
+        json={"status": "inactive"},
+    )
+    assert deactivate_member.status_code == 200, deactivate_member.text
+
+    login_attempt = client.post(
+        "/api/v1/auth/login",
+        json={"email": user.json()["email"], "password": "SecurePass123"},
+    )
+    assert login_attempt.status_code == 401, login_attempt.text
+    assert "Your account is inactive" in login_attempt.json()["detail"]
+
+    user_status = client.get("/api/v1/admin/users", headers=_auth_headers(tenant["token"]))
+    assert user_status.status_code == 200, user_status.text
+    assert next(item for item in user_status.json() if item["id"] == member_id)["status"] == "inactive"
+
+
+def test_admin_can_activate_a_user_and_audit_events_are_recorded():
+    tenant = _register_tenant("AuditLifecycle")
+
+    created = client.post(
+        "/api/v1/admin/users",
+        headers=_auth_headers(tenant["token"]),
+        json={
+            "name": "Lifecycle User",
+            "email": f"lifecycle_{uuid.uuid4().hex[:8]}@example.com",
+            "password": "SecurePass123",
+            "status": "active",
+        },
+    )
+    member_id = created.json()["id"]
+
+    deactivated = client.patch(
+        f"/api/v1/admin/users/{member_id}/status",
+        headers=_auth_headers(tenant["token"]),
+        json={"status": "inactive"},
+    )
+    assert deactivated.status_code == 200, deactivated.text
+
+    reactivated = client.patch(
+        f"/api/v1/admin/users/{member_id}/status",
+        headers=_auth_headers(tenant["token"]),
+        json={"status": "active"},
+    )
+    assert reactivated.status_code == 200, reactivated.text
+    assert reactivated.json()["status"] == "active"
+
+    audit = client.get("/api/v1/admin/audit", headers=_auth_headers(tenant["token"]))
+    assert audit.status_code == 200, audit.text
+    actions = {item["action"] for item in audit.json()}
+    assert "USER_DEACTIVATED" in actions
+    assert "USER_ACTIVATED" in actions
+
+
 def test_admin_can_change_responsibility_and_manage_multiple_teams():
     tenant = _register_tenant("Assignments")
     first_team = client.post(

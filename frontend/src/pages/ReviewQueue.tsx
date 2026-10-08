@@ -118,7 +118,7 @@ export default function ReviewQueue() {
                 <tr className="text-left text-sm text-slate-500">
                   <th className="px-6 py-4">Application</th>
                   <th className="px-6 py-4">Applicant</th>
-                  <th className="px-6 py-4">Workflow Stage</th>
+                  <th className="px-6 py-4">Routing</th>
                   <th className="px-6 py-4">Assigned Team</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4">Action</th>
@@ -132,7 +132,9 @@ export default function ReviewQueue() {
                     <td className="px-6 py-4">{application.applicant_name}</td>
                     <td className="px-6 py-4">
                       <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
-                        {application.current_workflow_stage ?? "Unassigned"}
+                        {application.routing_mode === "RISK_BASED_SINGLE_REVIEW"
+                          ? `${application.risk_level ?? "Unknown"} risk`
+                          : application.current_workflow_stage ?? "Unassigned"}
                       </span>
                     </td>
                     <td className="px-6 py-4">{application.assigned_team_name ?? "Unassigned"}</td>

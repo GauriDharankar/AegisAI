@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ExternalLink, FolderOpen, Loader2, Plus } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
-import { getTeams } from "../services/adminService";
+import { getRiskRouting, getTeams } from "../services/adminService";
 import api from "../services/api";
 import { getErrorMessage } from "../services/errorMessage";
 import { useToast } from "../components/ToastProvider";
@@ -32,6 +32,9 @@ interface ApplicationRecord {
   debt_to_income?: number | null;
   governance_status?: string | null;
   governance_result?: any;
+  routing_mode?: string | null;
+  risk_level?: string | null;
+  review_status?: string | null;
 }
 
 interface TeamOption {
@@ -63,6 +66,7 @@ export default function AdminApplications() {
   const { showToast } = useToast();
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
+  const [riskRoutingEnabled, setRiskRoutingEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -74,8 +78,9 @@ export default function AdminApplications() {
     }
 
     try {
-      const response = await getTeams(token);
-      setTeams(response.data ?? []);
+      const [teamResponse, routingResponse] = await Promise.all([getTeams(token), getRiskRouting(token)]);
+      setTeams(teamResponse.data ?? []);
+      setRiskRoutingEnabled(Boolean(routingResponse.data?.risk_routing?.enabled));
     } catch (teamError) {
       setError(getErrorMessage(teamError, "Unable to load teams."));
       setTeams([]);
@@ -145,7 +150,7 @@ export default function AdminApplications() {
           reference_code: form.reference_code.trim(),
           applicant_name: form.applicant_name.trim(),
           applicant_email: form.applicant_email.trim() || undefined,
-          team_id: form.team_id || undefined,
+          ...(riskRoutingEnabled ? {} : { team_id: form.team_id || undefined }),
           loan_type: form.loan_type.trim(),
           loan_amount: Number(form.loan_amount),
           loan_tenure_months: Number(form.loan_tenure_months),
@@ -264,7 +269,7 @@ export default function AdminApplications() {
             />
           </div>
 
-          <div>
+          {!riskRoutingEnabled && <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Assigned team</label>
             <select
               value={form.team_id}
@@ -278,8 +283,14 @@ export default function AdminApplications() {
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
         </div>
+
+        {riskRoutingEnabled && (
+          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Team assignment is automatic based on the tenant risk-routing configuration.
+          </p>
+        )}
 
         <div className="mt-5 flex items-center gap-3">
           <button
@@ -344,9 +355,14 @@ export default function AdminApplications() {
                   <div>
                     <span className="font-medium text-slate-700">Assigned team:</span> {application.assigned_team_name || "Unassigned"}
                   </div>
-                  <div>
-                    <span className="font-medium text-slate-700">Stage:</span> {application.current_workflow_stage || "Not assigned"}
-                  </div>
+                  {application.routing_mode === "RISK_BASED_SINGLE_REVIEW" ? (
+                    <>
+                      <div><span className="font-medium text-slate-700">Risk:</span> {application.risk_level || "Unknown"}</div>
+                      <div><span className="font-medium text-slate-700">Review:</span> {application.review_status || "PENDING"}</div>
+                    </>
+                  ) : (
+                    <div><span className="font-medium text-slate-700">Stage:</span> {application.current_workflow_stage || "Not assigned"}</div>
+                  )}
                   <div><span className="font-medium text-slate-700">AI governance:</span> {application.governance_status || "Not evaluated"}</div>
                   <div><span className="font-medium text-slate-700">Risk:</span> {application.governance_result?.risk?.level || "Not evaluated"}</div>
                   <div>

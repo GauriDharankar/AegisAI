@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.applications import _advance_application_to_next_stage, _record_audit_event, _require_tenant_application, _serialize_application
 from app.db.database import get_db
-from app.db.models import Application, AuditLog, Decision, Review, Role, User
+from app.db.models import Application, AuditLog, Decision, Review, Role, Team, Tenant, User
 from app.services.auth_service import get_current_user
 from app.services.blockchain_service import submit_blockchain_audit
 
@@ -68,6 +68,9 @@ def _require_reviewer_access(db: Session, current_user: User, application: Appli
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to the application review team.")
 
     required_role_name = REVIEWER_ROLE_BY_STAGE.get(application.current_workflow_stage)
+    if isinstance(application.governance_result, dict) and application.governance_result.get("routing_mode") == "RISK_BASED_SINGLE_REVIEW":
+        if assigned_team_roles & {"Operations Reviewer", "Risk Reviewer", "Credit Committee Reviewer"}:
+            return
     if required_role_name is None or required_role_name not in assigned_team_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to review this application stage.")
 
@@ -127,7 +130,16 @@ def list_reviewer_applications(
     return [
         _serialize_application(application)
         for application in applications
-        if REVIEWER_ROLE_BY_STAGE.get(application.current_workflow_stage) in roles_by_team.get(application.assigned_team_id, set())
+        if (
+            (
+                isinstance(application.governance_result, dict)
+                and application.governance_result.get("routing_mode") == "RISK_BASED_SINGLE_REVIEW"
+                and roles_by_team.get(application.assigned_team_id, set())
+                & {"Operations Reviewer", "Risk Reviewer", "Credit Committee Reviewer"}
+            )
+            or REVIEWER_ROLE_BY_STAGE.get(application.current_workflow_stage)
+            in roles_by_team.get(application.assigned_team_id, set())
+        )
     ]
 
 
@@ -160,6 +172,144 @@ def submit_reviewer_review(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to applications in this tenant.")
     _require_reviewer_access(db, current_user, application)
 
+    is_risk_based = (
+        isinstance(application.governance_result, dict)
+        and application.governance_result.get("routing_mode") == "RISK_BASED_SINGLE_REVIEW"
+    )
+    review_status = payload.status.strip().lower()
+
+    if is_risk_based:
+        governance_result = application.governance_result
+        governance_decision = governance_result.get("decision")
+        if not isinstance(governance_decision, dict) or governance_decision.get("final_decision") != "HUMAN_REVIEW":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This application is not awaiting a human review.")
+        if application.status == "completed":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A final review has already been submitted for this application.")
+        if review_status not in {"approved", "rejected"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Final human review status must be approved or rejected.")
+
+        assigned_team = db.get(Team, application.assigned_team_id) if application.assigned_team_id else None
+        if assigned_team is None or assigned_team.tenant_id != current_user.tenant_id or assigned_team.status != "active":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This application is not assigned to an active team in this tenant.")
+
+        existing_decision = db.execute(
+            select(Decision).where(Decision.application_id == application.id)
+        ).scalar_one_or_none()
+        if existing_decision is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A final review has already been submitted for this application.")
+
+        review = Review(
+            tenant_id=current_user.tenant_id,
+            application_id=application.id,
+            workflow_stage_id=None,
+            reviewer_id=current_user.id,
+            status=review_status,
+            comments=payload.comments.strip() if payload.comments else None,
+        )
+        db.add(review)
+        db.flush()
+        decision = Decision(
+            tenant_id=current_user.tenant_id,
+            application_id=application.id,
+            decision=review_status,
+            decision_maker_id=current_user.id,
+            ai_recommendation=governance_decision.get("final_decision"),
+            override_reason=payload.comments.strip() if payload.comments else None,
+        )
+        db.add(decision)
+        db.flush()
+        application.status = "completed"
+
+        _record_audit_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="review_submission",
+            resource_type="application",
+            resource_id=application.id,
+            metadata={
+                "application_id": application.id,
+                "review_id": review.id,
+                "review_status": review_status,
+                "routing_mode": "RISK_BASED_SINGLE_REVIEW",
+                "assigned_team_id": application.assigned_team_id,
+                "comments": review.comments,
+            },
+        )
+        _record_audit_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="final_decision_submitted",
+            resource_type="application",
+            resource_id=application.id,
+            metadata={
+                "application_id": application.id,
+                "decision_id": decision.id,
+                "final_decision": review_status,
+                "routing_mode": "RISK_BASED_SINGLE_REVIEW",
+                "risk_level": governance_result.get("risk_level") or (governance_result.get("risk") or {}).get("level"),
+                "assigned_team_id": application.assigned_team_id,
+                "comments": decision.override_reason,
+            },
+        )
+        db.commit()
+        db.refresh(application)
+
+        decision_blockchain_payload = {
+            "application_id": application.id,
+            "tenant_id": current_user.tenant_id,
+            "decision_id": decision.id,
+            "governance_id": governance_result.get("governance_id"),
+            "final_decision": review_status,
+            "decision_maker_id": current_user.id,
+            "workflow_stage": None,
+            "governance_status": application.governance_status,
+            "governance_route": governance_decision.get("final_decision"),
+        }
+        blockchain_result = submit_blockchain_audit(decision_blockchain_payload)
+        blockchain_metadata = {
+            "application_id": application.id,
+            "decision_id": decision.id,
+            "blockchain_status": blockchain_result.get("status", "FAILED"),
+            "audit_hash": blockchain_result.get("audit_hash"),
+            "transaction_hash": blockchain_result.get("transaction_hash"),
+            "audit_index": blockchain_result.get("audit_index"),
+        }
+        if blockchain_result.get("success"):
+            blockchain_action = "blockchain_audit_recorded"
+        else:
+            blockchain_action = "blockchain_audit_failed"
+            blockchain_metadata["message"] = blockchain_result.get(
+                "message",
+                "Blockchain audit service unavailable",
+            )
+        _record_audit_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action=blockchain_action,
+            resource_type="application",
+            resource_id=application.id,
+            metadata=blockchain_metadata,
+        )
+        db.commit()
+        return {
+            "id": review.id,
+            "application_id": application.id,
+            "workflow_stage": None,
+            "status": review.status,
+            "comments": review.comments,
+            "created_at": review.created_at.isoformat(),
+            "next_stage": None,
+            "next_team_id": None,
+            "finalized": True,
+            "decision": review_status,
+            "decision_id": decision.id,
+            "review_id": review.id,
+            "blockchain": blockchain_result,
+        }
+
     if application.current_workflow_stage_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This application is not assigned to a valid workflow stage.")
 
@@ -175,7 +325,6 @@ def submit_reviewer_review(
     if application.current_workflow_stage == "FINAL_DECISION":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Final decision stages are not handled by reviewer progression.")
 
-    review_status = payload.status.strip().lower()
     if review_status not in {"approved", "rejected", "pending"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Review status must be one of: approved, rejected, pending.")
 
@@ -206,6 +355,102 @@ def submit_reviewer_review(
             "comments": review.comments,
         },
     )
+
+    tenant_model = db.get(Tenant, current_user.tenant_id)
+    routing_config = dict((tenant_model.governance_configuration or {}).get("risk_routing") or {}) if tenant_model is not None else {}
+    if routing_config.get("enabled") and application.current_workflow_stage in {"OPERATIONS_REVIEW", "RISK_REVIEW", "CREDIT_COMMITTEE_REVIEW"}:
+        risk_level = str((application.governance_result or {}).get("risk", {}).get("level", "MEDIUM")).upper()
+        target_team = routing_config.get(f"{risk_level.lower()}_risk_team_id") or routing_config.get("default_team_id")
+        if application.assigned_team_id == target_team or (target_team is None and application.assigned_team_id is not None):
+            if review_status not in {"approved", "rejected"}:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Final human review status must be approved or rejected.")
+            application.status = "completed"
+            existing_decision = db.execute(select(Decision).where(Decision.application_id == application.id)).scalar_one_or_none()
+            decision = existing_decision
+            if existing_decision is None:
+                decision = Decision(
+                    tenant_id=current_user.tenant_id,
+                    application_id=application.id,
+                    decision=review_status,
+                    decision_maker_id=current_user.id,
+                    ai_recommendation=(application.governance_result or {}).get("decision", {}).get("final_decision") if isinstance(application.governance_result, dict) else None,
+                    override_reason=review.comments,
+                )
+                db.add(decision)
+                db.flush()
+
+            _record_audit_event(
+                db,
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="final_decision_submitted",
+                resource_type="application",
+                resource_id=application.id,
+                metadata={
+                    "application_id": application.id,
+                    "decision_id": decision.id,
+                    "final_decision": review_status,
+                    "workflow_stage": application.current_workflow_stage,
+                    "assigned_team_id": application.assigned_team_id,
+                    "comments": decision.override_reason,
+                },
+            )
+            db.commit()
+
+            governance_result = application.governance_result if isinstance(application.governance_result, dict) else {}
+            governance_decision = governance_result.get("decision")
+            decision_blockchain_payload = {
+                "application_id": application.id,
+                "tenant_id": current_user.tenant_id,
+                "decision_id": decision.id,
+                "governance_id": governance_result.get("governance_id"),
+                "final_decision": review_status,
+                "decision_maker_id": current_user.id,
+                "workflow_stage": application.current_workflow_stage,
+                "governance_status": application.governance_status,
+                "governance_route": governance_decision.get("final_decision") if isinstance(governance_decision, dict) else None,
+            }
+            blockchain_result = submit_blockchain_audit(decision_blockchain_payload)
+            blockchain_metadata = {
+                "application_id": application.id,
+                "decision_id": decision.id,
+                "blockchain_status": blockchain_result.get("status", "FAILED"),
+                "audit_hash": blockchain_result.get("audit_hash"),
+                "transaction_hash": blockchain_result.get("transaction_hash"),
+                "audit_index": blockchain_result.get("audit_index"),
+            }
+            if blockchain_result.get("success"):
+                blockchain_action = "blockchain_audit_recorded"
+            else:
+                blockchain_action = "blockchain_audit_failed"
+                blockchain_metadata["message"] = blockchain_result.get(
+                    "message",
+                    "Blockchain audit service unavailable",
+                )
+            _record_audit_event(
+                db,
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action=blockchain_action,
+                resource_type="application",
+                resource_id=application.id,
+                metadata=blockchain_metadata,
+            )
+            db.commit()
+            return {
+                "id": review.id,
+                "application_id": application.id,
+                "workflow_stage": current_stage,
+                "status": review.status,
+                "comments": review.comments,
+                "created_at": review.created_at.isoformat(),
+                "next_stage": None,
+                "next_team_id": None,
+                "finalized": True,
+                "decision": review_status,
+                "decision_id": decision.id,
+                "blockchain": blockchain_result,
+            }
 
     next_application = _advance_application_to_next_stage(db, application, current_user.tenant_id)
     return {

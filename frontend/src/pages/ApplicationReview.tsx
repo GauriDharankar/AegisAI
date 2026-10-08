@@ -66,7 +66,7 @@ export default function ApplicationReview() {
         showToast("Final decision saved successfully");
       } else {
         await reviewService.submitReview(token, id, {
-          status: decision,
+          status: isRiskBased ? finalDecision : decision,
           comments: comments.trim() || undefined,
         });
 
@@ -131,6 +131,8 @@ export default function ApplicationReview() {
     );
   }
 
+  const isRiskBased = application.routing_mode === "RISK_BASED_SINGLE_REVIEW";
+
   return (
     <div className="space-y-6">
       <button
@@ -151,7 +153,7 @@ export default function ApplicationReview() {
 
           <div className="flex flex-wrap items-center gap-3">
             <span className="rounded-full bg-blue-100 px-4 py-2 text-sm font-medium text-blue-700">
-              {application.current_workflow_stage ?? "Unassigned stage"}
+              {isRiskBased ? "Risk-based single review" : application.current_workflow_stage ?? "Unassigned stage"}
             </span>
             <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700">
               {application.assigned_team_name ?? "Unassigned team"}
@@ -160,10 +162,10 @@ export default function ApplicationReview() {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-4">
-          <div className="rounded-lg bg-slate-50 p-4">
+          {!isRiskBased && <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs text-slate-500">Workflow</p>
             <p className="mt-1 font-semibold">{application.workflow_name ?? "Not available"}</p>
-          </div>
+          </div>}
 
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs text-slate-500">Applicant email</p>
@@ -174,6 +176,7 @@ export default function ApplicationReview() {
             <p className="text-xs text-slate-500">Status</p>
             <p className="mt-1 font-semibold">{application.status}</p>
           </div>
+          {isRiskBased && <><div className="rounded-lg bg-slate-50 p-4"><p className="text-xs text-slate-500">Risk</p><p className="mt-1 font-semibold">{application.risk_level ?? "Unknown"}</p></div><div className="rounded-lg bg-slate-50 p-4"><p className="text-xs text-slate-500">Review</p><p className="mt-1 font-semibold">{application.review_status ?? "PENDING"}</p></div></>}
 
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs text-slate-500">Created</p>
@@ -204,7 +207,9 @@ export default function ApplicationReview() {
         </h2>
 
         <p className="mt-1 text-sm text-slate-500">
-          {application.current_workflow_stage === "FINAL_DECISION"
+          {isRiskBased
+            ? "Provide the final reviewer outcome and notes for this application."
+            : application.current_workflow_stage === "FINAL_DECISION"
             ? "Provide the final approval or rejection for this application."
             : "Provide the reviewer outcome and notes for the current workflow stage."}
         </p>
@@ -225,13 +230,13 @@ export default function ApplicationReview() {
         <form onSubmit={handleSubmit} className="mt-5 space-y-5">
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              {application.current_workflow_stage === "FINAL_DECISION" ? "Final decision" : "Decision"}
+              {isRiskBased || application.current_workflow_stage === "FINAL_DECISION" ? "Final decision" : "Decision"}
             </label>
             <select
-              value={application.current_workflow_stage === "FINAL_DECISION" ? finalDecision : decision}
+              value={isRiskBased || application.current_workflow_stage === "FINAL_DECISION" ? finalDecision : decision}
               onChange={(event) => {
                 const nextValue = event.target.value;
-                if (application.current_workflow_stage === "FINAL_DECISION") {
+                if (isRiskBased || application.current_workflow_stage === "FINAL_DECISION") {
                   setFinalDecision(nextValue as "approved" | "rejected");
                 } else {
                   setDecision(nextValue as "approved" | "rejected" | "pending");
@@ -239,7 +244,7 @@ export default function ApplicationReview() {
               }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             >
-              {application.current_workflow_stage === "FINAL_DECISION" ? (
+              {isRiskBased || application.current_workflow_stage === "FINAL_DECISION" ? (
                 <>
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
@@ -261,7 +266,7 @@ export default function ApplicationReview() {
               onChange={(event) => setComments(event.target.value)}
               rows={5}
               placeholder={
-                application.current_workflow_stage === "FINAL_DECISION"
+                isRiskBased || application.current_workflow_stage === "FINAL_DECISION"
                   ? "Add final decision rationale..."
                   : "Add reviewer notes..."
               }
@@ -275,7 +280,7 @@ export default function ApplicationReview() {
               disabled={submitting || application.status === "completed"}
               className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {submitting ? "Submitting..." : application.status === "completed" ? "Application Finalized" : application.current_workflow_stage === "FINAL_DECISION" ? "Submit Final Decision" : "Submit Review"}
+              {submitting ? "Submitting..." : application.status === "completed" ? "Application Finalized" : isRiskBased ? "Submit Final Review" : application.current_workflow_stage === "FINAL_DECISION" ? "Submit Final Decision" : "Submit Review"}
             </button>
           </div>
         </form>

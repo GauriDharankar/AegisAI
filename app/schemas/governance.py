@@ -161,6 +161,22 @@ class AutoApproveConfig(BaseModel):
     eligible_loan_types: list[str] = Field(default_factory=list)
 
 
+class RiskRoutingConfig(BaseModel):
+    """Tenant-configured team routing for human review applications."""
+
+    enabled: bool = False
+    default_team_id: Optional[str] = None
+    low_risk_team_id: Optional[str] = None
+    medium_risk_team_id: Optional[str] = None
+    high_risk_team_id: Optional[str] = None
+    review_stage: Literal[
+        "OPERATIONS_REVIEW",
+        "RISK_REVIEW",
+        "CREDIT_COMMITTEE_REVIEW",
+        "FINAL_DECISION",
+    ] = "RISK_REVIEW"
+
+
 # ============================================================
 # COMPLETE GOVERNANCE CONFIGURATION
 # ============================================================

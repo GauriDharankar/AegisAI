@@ -19,7 +19,7 @@ from app.db.models import (
     User,
     WorkflowStage,
 )
-from app.schemas.governance import AutoApproveConfig
+from app.schemas.governance import AutoApproveConfig, RiskRoutingConfig
 from app.services.auth_service import get_current_user, hash_password, normalize_email, validate_password
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Tenant Admin"])
@@ -102,19 +102,42 @@ class WorkflowRequest(BaseModel):
 
 
 class TenantConfigurationRequest(BaseModel):
-    auto_approve: AutoApproveConfig
+    auto_approve: AutoApproveConfig | None = None
+    risk_routing: RiskRoutingConfig | None = None
 
 
 def _default_auto_approve_configuration() -> dict[str, Any]:
     return AutoApproveConfig().model_dump()
 
 
+def _default_risk_routing_configuration() -> dict[str, Any]:
+    return RiskRoutingConfig().model_dump()
+
+
 def _tenant_configuration(tenant: Tenant) -> dict[str, Any]:
     configuration = dict(tenant.governance_configuration or {})
     auto_approve = dict(configuration.get("auto_approve") or {})
+    risk_routing = dict(configuration.get("risk_routing") or {})
+
     defaults = _default_auto_approve_configuration()
     defaults.update(auto_approve)
-    return {"auto_approve": defaults}
+
+    risk_defaults = _default_risk_routing_configuration()
+    risk_defaults.update(risk_routing)
+
+    return {"auto_approve": defaults, "risk_routing": risk_defaults}
+
+
+def _validate_risk_routing_config(db: Session, tenant: Tenant, payload: RiskRoutingConfig) -> None:
+    for field_name in ("default_team_id", "low_risk_team_id", "medium_risk_team_id", "high_risk_team_id"):
+        team_id = getattr(payload, field_name)
+        if team_id is None:
+            continue
+        team = db.get(Team, team_id)
+        if team is None or team.tenant_id != tenant.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team not found in this tenant: {team_id}")
+        if team.status != "active":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Team {team.name} is inactive and cannot be assigned.")
 
 
 def _canonicalize_responsibility(value: str | None) -> str | None:
@@ -223,6 +246,24 @@ def _require_own_user(db: Session, tenant: Tenant, user_id: str) -> User:
     return user
 
 
+def _is_tenant_admin(db: Session, user: User) -> bool:
+    if user.primary_role_id is None:
+        return False
+    role = db.get(Role, user.primary_role_id)
+    return role is not None and role.name == "Tenant Admin"
+
+
+def _count_other_active_tenant_admins(db: Session, tenant_id: str, excluded_user_id: str | None = None) -> int:
+    query = select(User.id).join(Role, User.primary_role_id == Role.id).where(
+        User.tenant_id == tenant_id,
+        User.status == "active",
+        Role.name == "Tenant Admin",
+    )
+    if excluded_user_id is not None:
+        query = query.where(User.id != excluded_user_id)
+    return db.execute(query).scalars().count()
+
+
 def _require_own_team(db: Session, tenant: Tenant, team_id: str) -> Team:
     team = db.get(Team, team_id)
     if team is None or team.tenant_id != tenant.id:
@@ -305,11 +346,14 @@ def _ensure_tenant_workflow(db: Session, tenant_id: str) -> GovernanceWorkflow:
 
 def _validate_workflow(db: Session, workflow: GovernanceWorkflow, tenant: Tenant) -> None:
     stages = sorted(workflow.stages, key=lambda stage: stage.stage_order)
+    risk_routing_enabled = bool(
+        (tenant.governance_configuration or {}).get("risk_routing", {}).get("enabled", False)
+    )
     order_values = [stage.stage_order for stage in stages]
     if len(order_values) != len(set(order_values)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow stage orders must be unique.")
 
-    if not stages:
+    if not stages and not risk_routing_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow must contain at least one stage.")
 
     for stage in stages:
@@ -325,8 +369,17 @@ def _validate_workflow(db: Session, workflow: GovernanceWorkflow, tenant: Tenant
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid stage status for {stage.stage_type}.")
 
     final_count = sum(1 for stage in stages if stage.stage_type == "FINAL_DECISION" and stage.status == "active")
-    if final_count != 1:
+    if risk_routing_enabled and final_count > 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Risk-based workflows may contain at most one active Final Decision stage.")
+    if not risk_routing_enabled and final_count != 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Exactly one active Final Decision stage is required.")
+
+    active_review_stages = [
+        stage for stage in stages
+        if stage.stage_type in REVIEW_STAGE_TYPES and stage.status == "active"
+    ]
+    if risk_routing_enabled and stages and not active_review_stages:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Risk-based workflows require at least one active review stage.")
 
     review_before_final = False
     final_stage = next((stage for stage in stages if stage.stage_type == "FINAL_DECISION" and stage.status == "active"), None)
@@ -335,7 +388,7 @@ def _validate_workflow(db: Session, workflow: GovernanceWorkflow, tenant: Tenant
             stage.stage_type in REVIEW_STAGE_TYPES and stage.status == "active" and stage.stage_order < final_stage.stage_order
             for stage in stages
         )
-    if not review_before_final:
+    if not risk_routing_enabled and not review_before_final:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one review stage is required before the Final Decision stage.")
 
 
@@ -407,10 +460,40 @@ def update_configuration(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _, tenant = admin_context
-    tenant.governance_configuration = {"auto_approve": payload.auto_approve.model_dump()}
+    existing = dict(tenant.governance_configuration or {})
+    if payload.auto_approve is not None:
+        existing["auto_approve"] = payload.auto_approve.model_dump()
+    if payload.risk_routing is not None:
+        _validate_risk_routing_config(db, tenant, payload.risk_routing)
+        existing["risk_routing"] = payload.risk_routing.model_dump()
+    tenant.governance_configuration = existing
     db.commit()
     db.refresh(tenant)
     return {"tenant_id": tenant.id, **_tenant_configuration(tenant)}
+
+
+@router.get("/risk-routing")
+def get_risk_routing(
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+) -> dict[str, Any]:
+    _, tenant = admin_context
+    return {"tenant_id": tenant.id, "risk_routing": _tenant_configuration(tenant)["risk_routing"]}
+
+
+@router.put("/risk-routing")
+def update_risk_routing(
+    payload: RiskRoutingConfig,
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _, tenant = admin_context
+    _validate_risk_routing_config(db, tenant, payload)
+    existing = dict(tenant.governance_configuration or {})
+    existing["risk_routing"] = payload.model_dump()
+    tenant.governance_configuration = existing
+    db.commit()
+    db.refresh(tenant)
+    return {"tenant_id": tenant.id, "risk_routing": _tenant_configuration(tenant)["risk_routing"]}
 
 
 @router.put("/organization")
@@ -776,11 +859,54 @@ def update_user_status(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     user = _require_own_user(db, tenant, user_id)
-    if payload.status not in VALID_TEAM_STATUSES:
+    next_status = payload.status.strip().lower()
+    if next_status not in VALID_TEAM_STATUSES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user status.")
-    user.status = payload.status
+    if user.status == next_status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"User is already {next_status}.",
+        )
+
+    previous_status = user.status
+    if next_status == "inactive":
+        if user.id == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot deactivate your own currently active administrator account.",
+            )
+
+        if _is_tenant_admin(db, user) and previous_status == "active":
+            remaining_admins = _count_other_active_tenant_admins(db, tenant.id, excluded_user_id=user.id)
+            if remaining_admins == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot deactivate the last active tenant administrator. Assign another administrator first.",
+                )
+
+    user.status = next_status
+    db.commit()
+    db.refresh(user)
+
+    action = "USER_DEACTIVATED" if next_status == "inactive" else "USER_ACTIVATED"
+    db.add(
+        AuditLog(
+            tenant_id=tenant.id,
+            actor_user_id=current_user.id,
+            action=action,
+            resource_type="user",
+            resource_id=user.id,
+            metadata_data={
+                "target_user_id": user.id,
+                "target_user_name": user.name,
+                "target_user_email": user.email,
+                "previous_status": previous_status,
+                "new_status": next_status,
+            },
+        )
+    )
     db.commit()
     return _serialize_user(user, db)
 

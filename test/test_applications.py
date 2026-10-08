@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from app.api.applications import ApplicationCreateRequest, _evaluate_application
-from app.db.database import SessionLocal, migrate_sqlite_application_schema
-from app.db.models import AuditLog
+from app.db.database import SessionLocal, migrate_sqlite_application_schema, migrate_sqlite_review_schema
+from app.db.models import AuditLog, Decision, Review
 from app.main import app
 from app.services.financial_service import calculate_debt_to_income
 from app.services.governance_service import governance_service
@@ -99,6 +99,359 @@ def _create_team(token: str, name: str) -> str:
     return response.json()["id"]
 
 
+def test_risk_routing_configuration_assigns_human_review_to_configured_team(monkeypatch):
+    token, _ = _register_tenant("TenantRiskRouting")
+    default_team = _create_team(token, "Default Review Team")
+    medium_team = _create_team(token, "Medium Risk Review Team")
+
+    config_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "enabled": True,
+            "default_team_id": default_team,
+            "medium_risk_team_id": medium_team,
+            "review_stage": "RISK_REVIEW",
+        },
+    )
+    assert config_response.status_code == 200, config_response.text
+    assert config_response.json()["risk_routing"]["enabled"] is True
+
+    def fake_evaluate(**kwargs):
+        return {
+            "governance_id": "GOV-TEST-ROUTING",
+            "governance_status": "review_required",
+            "risk": {"level": "MEDIUM"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        }
+
+    monkeypatch.setattr(governance_service, "evaluate", fake_evaluate)
+
+    response = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "reference_code": "APP-RISK-1001",
+            "applicant_name": "Risk Route Applicant",
+            "applicant_email": "risk@example.com",
+            "loan_amount": 150000,
+            "monthly_income": 45000,
+            "credit_score": 660,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["assigned_team_id"] == medium_team
+    assert payload["routing_mode"] == "RISK_BASED_SINGLE_REVIEW"
+    assert payload["risk_level"] == "MEDIUM"
+    assert payload["current_workflow_stage"] is None
+
+    rejected_override = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "reference_code": "APP-RISK-1002",
+            "applicant_name": "Override Attempt",
+            "team_id": default_team,
+        },
+    )
+    assert rejected_override.status_code == 400
+
+
+def test_low_risk_human_review_routes_to_configured_low_team(monkeypatch):
+    token, _ = _register_tenant("TenantLowRiskRouting")
+    low_team = _create_team(token, "Low Risk Review Team")
+
+    config_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={"enabled": True, "low_risk_team_id": low_team, "review_stage": "RISK_REVIEW"},
+    )
+    assert config_response.status_code == 200, config_response.text
+
+    monkeypatch.setattr(
+        governance_service,
+        "evaluate",
+        lambda **kwargs: {
+            "governance_id": "GOV-TEST-LOW-ROUTING",
+            "governance_status": "review_required",
+            "risk": {"level": "LOW"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        },
+    )
+
+    response = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token},
+        json={"reference_code": "APP-RISK-LOW", "applicant_name": "Low Risk Applicant"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["assigned_team_id"] == low_team
+
+
+def test_high_risk_human_review_routes_to_configured_high_team(monkeypatch):
+    token, _ = _register_tenant("TenantHighRiskRouting")
+    high_team = _create_team(token, "High Risk Review Team")
+
+    config_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={"enabled": True, "high_risk_team_id": high_team, "review_stage": "RISK_REVIEW"},
+    )
+    assert config_response.status_code == 200, config_response.text
+
+    monkeypatch.setattr(
+        governance_service,
+        "evaluate",
+        lambda **kwargs: {
+            "governance_id": "GOV-TEST-HIGH-ROUTING",
+            "governance_status": "review_required",
+            "risk": {"level": "HIGH"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        },
+    )
+
+    response = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token},
+        json={"reference_code": "APP-RISK-HIGH", "applicant_name": "High Risk Applicant"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["assigned_team_id"] == high_team
+
+
+def test_risk_routing_is_tenant_specific_for_low_risk_applications(monkeypatch):
+    token_a, _ = _register_tenant("TenantLowRoutingA")
+    token_b, _ = _register_tenant("TenantLowRoutingB")
+    team_a = _create_team(token_a, "Tenant A Low Risk Team")
+    team_b = _create_team(token_b, "Tenant B Low Risk Team")
+
+    for token, team_id in ((token_a, team_a), (token_b, team_b)):
+        config_response = client.put(
+            "/api/v1/admin/risk-routing",
+            headers={"Authorization": "Bearer " + token},
+            json={"enabled": True, "low_risk_team_id": team_id, "review_stage": "RISK_REVIEW"},
+        )
+        assert config_response.status_code == 200, config_response.text
+
+    monkeypatch.setattr(
+        governance_service,
+        "evaluate",
+        lambda **kwargs: {
+            "governance_id": "GOV-TEST-TENANT-LOW-ROUTING",
+            "governance_status": "review_required",
+            "risk": {"level": "LOW"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        },
+    )
+
+    app_a = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token_a},
+        json={"reference_code": "APP-RISK-TENANT-A", "applicant_name": "Tenant A Applicant"},
+    )
+    app_b = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token_b},
+        json={"reference_code": "APP-RISK-TENANT-B", "applicant_name": "Tenant B Applicant"},
+    )
+    assert app_a.status_code == 200, app_a.text
+    assert app_b.status_code == 200, app_b.text
+    assert app_a.json()["assigned_team_id"] == team_a
+    assert app_b.json()["assigned_team_id"] == team_b
+
+
+def test_risk_based_single_review_persists_final_audit_and_blockchain_failure(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.reviewer.submit_blockchain_audit",
+        lambda payload: {
+            "success": False,
+            "status": "FAILED",
+            "message": "Blockchain audit service unavailable",
+        },
+    )
+    token, tenant_id = _register_tenant("TenantRiskSingleReview")
+    review_team = _create_team(token, "Risk Single Review Team")
+
+    config_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={"enabled": True, "medium_risk_team_id": review_team, "review_stage": "RISK_REVIEW"},
+    )
+    assert config_response.status_code == 200, config_response.text
+
+    monkeypatch.setattr(
+        governance_service,
+        "evaluate",
+        lambda **kwargs: {
+            "governance_id": "GOV-TEST-SINGLE-REVIEW",
+            "governance_status": "review_required",
+            "risk": {"level": "MEDIUM"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        },
+    )
+    application_response = client.post(
+        "/api/v1/applications",
+        headers={"Authorization": "Bearer " + token},
+        json={"reference_code": "APP-RISK-SINGLE", "applicant_name": "Single Review Applicant"},
+    )
+    assert application_response.status_code == 200, application_response.text
+    application_id = application_response.json()["id"]
+
+    reviewer_email = f"risk_reviewer_{uuid.uuid4().hex[:8]}@example.com"
+    reviewer_response = client.post(
+        "/api/v1/admin/users",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "name": "Risk Reviewer",
+            "email": reviewer_email,
+            "password": "SecurePass123",
+            "status": "active",
+            "responsibilities": ["RISK_REVIEWER"],
+            "team_ids": [review_team],
+        },
+    )
+    assert reviewer_response.status_code == 200, reviewer_response.text
+    reviewer_token = _login_as_user(reviewer_email, "SecurePass123")
+
+    review_response = client.post(
+        f"/api/v1/reviewer/applications/{application_id}/reviews",
+        headers={"Authorization": "Bearer " + reviewer_token},
+        json={"status": "approved", "comments": "Approved by risk reviewer."},
+    )
+    assert review_response.status_code == 200, review_response.text
+    assert review_response.json()["finalized"] is True
+    assert review_response.json()["decision"] == "approved"
+    assert review_response.json()["blockchain"]["success"] is False
+
+    duplicate_response = client.post(
+        f"/api/v1/reviewer/applications/{application_id}/reviews",
+        headers={"Authorization": "Bearer " + reviewer_token},
+        json={"status": "rejected", "comments": "Duplicate attempt."},
+    )
+    assert duplicate_response.status_code == 400, duplicate_response.text
+
+    refreshed = client.get(
+        f"/api/v1/applications/{application_id}",
+        headers={"Authorization": "Bearer " + token},
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["status"] == "completed"
+
+    with SessionLocal() as session:
+        decision = session.query(Decision).filter(Decision.application_id == application_id).one()
+        logs = session.query(AuditLog).filter(AuditLog.tenant_id == tenant_id, AuditLog.resource_id == application_id).all()
+        assert decision.decision == "approved"
+        assert any(log.action == "final_decision_submitted" for log in logs)
+        failed_blockchain_log = next(log for log in logs if log.action == "blockchain_audit_failed")
+        assert failed_blockchain_log.metadata_data["decision_id"] == decision.id
+
+
+def test_high_risk_single_review_approves_and_rejects_without_workflow_stages(monkeypatch):
+    blockchain_payloads = []
+
+    def record_blockchain(payload):
+        blockchain_payloads.append(payload)
+        return {
+            "success": True,
+            "status": "RECORDED",
+            "audit_hash": f"hash-{len(blockchain_payloads)}",
+            "transaction_hash": f"tx-{len(blockchain_payloads)}",
+            "audit_index": str(len(blockchain_payloads)),
+        }
+
+    monkeypatch.setattr("app.api.reviewer.submit_blockchain_audit", record_blockchain)
+    token, tenant_id = _register_tenant("TenantHighRiskSingleReview")
+    high_team = _create_team(token, "Configured High Risk Team")
+    config_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={"enabled": True, "high_risk_team_id": high_team, "review_stage": "RISK_REVIEW"},
+    )
+    assert config_response.status_code == 200, config_response.text
+    monkeypatch.setattr(
+        governance_service,
+        "evaluate",
+        lambda **kwargs: {
+            "governance_id": "GOV-TEST-HIGH-SINGLE-REVIEW",
+            "governance_status": "review_required",
+            "risk": {"level": "HIGH"},
+            "decision": {"final_decision": "HUMAN_REVIEW"},
+        },
+    )
+
+    application_ids = []
+    for reference_code in ("APP-HIGH-APPROVE", "APP-HIGH-REJECT"):
+        response = client.post(
+            "/api/v1/applications",
+            headers={"Authorization": "Bearer " + token},
+            json={"reference_code": reference_code, "applicant_name": "High Risk Applicant"},
+        )
+        assert response.status_code == 200, response.text
+        application = response.json()
+        assert application["routing_mode"] == "RISK_BASED_SINGLE_REVIEW"
+        assert application["risk_level"] == "HIGH"
+        assert application["assigned_team_id"] == high_team
+        assert application["current_workflow_stage_id"] is None
+        application_ids.append(application["id"])
+
+    reviewer_email = f"high_reviewer_{uuid.uuid4().hex[:8]}@example.com"
+    reviewer_response = client.post(
+        "/api/v1/admin/users",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "name": "High Risk Reviewer",
+            "email": reviewer_email,
+            "password": "SecurePass123",
+            "status": "active",
+            "responsibilities": ["CREDIT_COMMITTEE_REVIEWER"],
+            "team_ids": [high_team],
+        },
+    )
+    assert reviewer_response.status_code == 200, reviewer_response.text
+    reviewer_token = _login_as_user(reviewer_email, "SecurePass123")
+
+    for application_id, outcome in zip(application_ids, ("approved", "rejected")):
+        response = client.post(
+            f"/api/v1/reviewer/applications/{application_id}/reviews",
+            headers={"Authorization": "Bearer " + reviewer_token},
+            json={"status": outcome, "comments": f"Final {outcome}."},
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["finalized"] is True
+        assert result["decision"] == outcome
+        assert result["next_stage"] is None
+        assert result["blockchain"]["success"] is True
+
+    assert len(blockchain_payloads) == 2
+    assert all(payload["workflow_stage"] is None for payload in blockchain_payloads)
+    for application_id, outcome in zip(application_ids, ("approved", "rejected")):
+        duplicate_response = client.post(
+            f"/api/v1/reviewer/applications/{application_id}/reviews",
+            headers={"Authorization": "Bearer " + reviewer_token},
+            json={"status": "approved"},
+        )
+        assert duplicate_response.status_code == 400, duplicate_response.text
+
+    with SessionLocal() as session:
+        decisions = session.query(Decision).filter(Decision.application_id.in_(application_ids)).all()
+        reviews = session.query(Review).filter(Review.application_id.in_(application_ids)).all()
+        logs = session.query(AuditLog).filter(
+            AuditLog.tenant_id == tenant_id,
+            AuditLog.resource_id.in_(application_ids),
+        ).all()
+        assert {decision.decision for decision in decisions} == {"approved", "rejected"}
+        assert len(reviews) == 2
+        assert all(review.workflow_stage_id is None for review in reviews)
+        for application_id in application_ids:
+            actions = {log.action for log in logs if log.resource_id == application_id}
+            assert "review_submission" in actions
+            assert "final_decision_submitted" in actions
+            assert "blockchain_audit_recorded" in actions
+
+
 def test_legacy_sqlite_application_schema_upgrade_adds_missing_columns_and_preserves_data():
     engine = create_engine("sqlite://", future=True)
     with engine.begin() as connection:
@@ -149,6 +502,54 @@ def test_legacy_sqlite_application_schema_upgrade_adds_missing_columns_and_prese
         assert row[2] == "OPERATIONS_REVIEW"
         assert row[3] == "WFS-1"
         assert row[4] == "TEAM-1"
+
+
+def test_legacy_sqlite_review_schema_allows_stage_free_reviews_and_preserves_data():
+    engine = create_engine("sqlite://", future=True)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE reviews (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                tenant_id VARCHAR(64) NOT NULL,
+                application_id VARCHAR(64) NOT NULL,
+                workflow_stage_id VARCHAR(64) NOT NULL,
+                reviewer_id VARCHAR(64) NOT NULL,
+                status VARCHAR(40) NOT NULL,
+                comments TEXT,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO reviews (
+                id, tenant_id, application_id, workflow_stage_id, reviewer_id,
+                status, comments, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            """,
+            ("REV-LEGACY", "TEN-LEGACY", "APP-LEGACY", "WFS-LEGACY", "USR-LEGACY", "approved", "Preserved"),
+        )
+
+    migrate_sqlite_review_schema(engine)
+
+    with engine.begin() as connection:
+        stage_column = next(
+            row for row in connection.exec_driver_sql("PRAGMA table_info(reviews)").fetchall()
+            if row[1] == "workflow_stage_id"
+        )
+        assert stage_column[3] == 0
+        row = connection.exec_driver_sql(
+            "SELECT id, workflow_stage_id, status, comments FROM reviews WHERE id = ?",
+            ("REV-LEGACY",),
+        ).fetchone()
+        assert row == ("REV-LEGACY", "WFS-LEGACY", "approved", "Preserved")
+        indexes = {
+            row[1] for row in connection.exec_driver_sql("PRAGMA index_list(reviews)").fetchall()
+        }
+        assert "ix_reviews_stage_id" in indexes
+    engine.dispose()
 
 
 def test_authenticated_user_can_create_application():

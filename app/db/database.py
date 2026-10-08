@@ -172,6 +172,59 @@ def migrate_sqlite_tenant_schema(target_engine=None) -> None:
             )
 
 
+def migrate_sqlite_review_schema(target_engine=None) -> None:
+    bind = target_engine or engine
+    with bind.begin() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "reviews" not in tables:
+            return
+
+        stage_column = next(
+            row
+            for row in connection.exec_driver_sql("PRAGMA table_info(reviews)").fetchall()
+            if row[1] == "workflow_stage_id"
+        )
+        if not stage_column[3]:
+            return
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE reviews_new (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                application_id VARCHAR(64) NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+                workflow_stage_id VARCHAR(64) REFERENCES workflow_stages(id) ON DELETE CASCADE,
+                reviewer_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+                status VARCHAR(40) NOT NULL,
+                comments TEXT,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO reviews_new (
+                id, tenant_id, application_id, workflow_stage_id, reviewer_id,
+                status, comments, created_at, updated_at
+            )
+            SELECT
+                id, tenant_id, application_id, workflow_stage_id, reviewer_id,
+                status, comments, created_at, updated_at
+            FROM reviews
+            """
+        )
+        connection.exec_driver_sql("DROP TABLE reviews")
+        connection.exec_driver_sql("ALTER TABLE reviews_new RENAME TO reviews")
+        connection.exec_driver_sql("CREATE INDEX ix_reviews_tenant_id ON reviews (tenant_id)")
+        connection.exec_driver_sql("CREATE INDEX ix_reviews_application_id ON reviews (application_id)")
+        connection.exec_driver_sql("CREATE INDEX ix_reviews_reviewer_id ON reviews (reviewer_id)")
+        connection.exec_driver_sql("CREATE INDEX ix_reviews_stage_id ON reviews (workflow_stage_id)")
+
+
 def init_db() -> None:
     from app.db.models import (  # noqa: F401
         Application,
@@ -203,3 +256,4 @@ def init_db() -> None:
 
     migrate_sqlite_application_schema(engine)
     migrate_sqlite_tenant_schema(engine)
+    migrate_sqlite_review_schema(engine)

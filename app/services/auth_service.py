@@ -138,8 +138,13 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session token.")
 
     user = db.get(User, user_id)
-    if user is None or user.status != "active":
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your account is inactive. Contact your organization administrator.",
+        )
 
     return user
 

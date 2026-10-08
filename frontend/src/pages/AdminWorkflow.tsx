@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { getTeams, getWorkflow, updateWorkflow } from "../services/adminService";
+import { getRiskRouting, getTeams, getWorkflow, updateWorkflow } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
 import { useToast } from "../components/ToastProvider";
 
@@ -37,6 +37,7 @@ export default function AdminWorkflow() {
     stages: [],
   });
   const [loading, setLoading] = useState(true);
+  const [riskRoutingEnabled, setRiskRoutingEnabled] = useState(false);
 
   const availableStages = useMemo(
     () => workflow.stages.map((stage) => stage.stage_type),
@@ -48,12 +49,14 @@ export default function AdminWorkflow() {
       return;
     }
 
-    const [teamResponse, workflowResponse] = await Promise.all([
+    const [teamResponse, workflowResponse, routingResponse] = await Promise.all([
       getTeams(token),
       getWorkflow(token),
+      getRiskRouting(token),
     ]);
 
     setTeams(teamResponse.data ?? []);
+    setRiskRoutingEnabled(Boolean(routingResponse.data?.risk_routing?.enabled));
     setWorkflow({
       name: workflowResponse.data?.name ?? "Default Governance Workflow",
       status: workflowResponse.data?.status ?? "active",
@@ -166,6 +169,11 @@ export default function AdminWorkflow() {
         <h1 className="mt-2 text-3xl font-bold text-slate-900">Governance Workflow</h1>
         <p className="mt-2 text-slate-600">
           Current workflow for the authenticated tenant. The number of stages and assignments come from the tenant’s configured workflow, not a fixed four-level model.
+        </p>
+        <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          {riskRoutingEnabled
+            ? "Risk-based single-review routing is enabled. Workflow stages are not required. Human reviews are assigned automatically using the tenant's LOW/MEDIUM/HIGH risk-routing configuration."
+            : "Legacy sequential routing is active. Configure exactly one active Final Decision stage after a review stage."}
         </p>
       </div>
 

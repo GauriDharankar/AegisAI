@@ -134,7 +134,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
     if user.status != "active":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="This account is inactive.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your account is inactive. Contact your organization administrator.",
+        )
 
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")

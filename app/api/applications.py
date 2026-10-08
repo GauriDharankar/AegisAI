@@ -103,6 +103,12 @@ def _evaluate_application(
 
 
 def _serialize_application(application: Application) -> dict[str, Any]:
+    governance_result = application.governance_result if isinstance(application.governance_result, dict) else {}
+    routing_mode = governance_result.get("routing_mode", "LEGACY_WORKFLOW")
+    risk_level = governance_result.get("risk_level") or (governance_result.get("risk") or {}).get("level")
+    is_risk_based = routing_mode == "RISK_BASED_SINGLE_REVIEW"
+    decision = application.decisions[0] if application.decisions else None
+    review_status = decision.decision.upper() if decision is not None else ("PENDING" if is_risk_based and application.status != "completed" else None)
     return {
         "id": application.id,
         "tenant_id": application.tenant_id,
@@ -124,8 +130,11 @@ def _serialize_application(application: Application) -> dict[str, Any]:
         "governance_status": application.governance_status,
         "governance_result": application.governance_result,
         "status": application.status,
-        "current_workflow_stage": application.current_workflow_stage,
-        "current_workflow_stage_id": application.current_workflow_stage_id,
+        "routing_mode": routing_mode,
+        "risk_level": risk_level,
+        "review_status": review_status,
+        "current_workflow_stage": None if is_risk_based else application.current_workflow_stage,
+        "current_workflow_stage_id": None if is_risk_based else application.current_workflow_stage_id,
         "assigned_team_id": application.assigned_team_id,
         "assigned_team_name": application.assigned_team.name if application.assigned_team else None,
         "created_at": application.created_at.isoformat(),
@@ -177,7 +186,52 @@ def _validate_workflow_stage_for_tenant(db: Session, tenant_id: str, stage_id: s
     return stage.id
 
 
-def _get_active_tenant_workflow(db: Session, tenant_id: str) -> tuple[GovernanceWorkflow, WorkflowStage]:
+def _resolve_risk_routing_team_id(db: Session, tenant_id: str, governance_result: dict[str, Any]) -> str | None:
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        return None
+
+    routing = dict((tenant.governance_configuration or {}).get("risk_routing") or {})
+    if not routing.get("enabled", False):
+        return None
+
+    risk_level = str((governance_result.get("risk") or {}).get("level", "MEDIUM")).upper()
+    team_id = routing.get(f"{risk_level.lower()}_risk_team_id") if risk_level in {"LOW", "MEDIUM", "HIGH"} else None
+    if team_id is None:
+        team_id = routing.get("default_team_id")
+    if team_id is None:
+        return None
+
+    team = db.get(Team, team_id)
+    if team is None or team.tenant_id != tenant_id:
+        return None
+    if team.status != "active":
+        return None
+    return team.id
+
+
+def _select_risk_review_stage(db: Session, workflow: GovernanceWorkflow, tenant_id: str, preferred_stage_type: str | None) -> WorkflowStage | None:
+    stage_type = (preferred_stage_type or "RISK_REVIEW").strip().upper()
+    if stage_type not in {"OPERATIONS_REVIEW", "RISK_REVIEW", "CREDIT_COMMITTEE_REVIEW"}:
+        return None
+
+    ordered = sorted(workflow.stages, key=lambda stage: stage.stage_order)
+    for stage in ordered:
+        if stage.stage_type == stage_type and stage.status == "active":
+            if stage.team_id is not None:
+                team = db.get(Team, stage.team_id)
+                if team is None or team.tenant_id != tenant_id or team.status != "active":
+                    continue
+            return stage
+    return None
+
+
+def _get_active_tenant_workflow(
+    db: Session,
+    tenant_id: str,
+    *,
+    allow_empty_stages: bool = False,
+) -> tuple[GovernanceWorkflow, WorkflowStage | None]:
     workflow = db.execute(
         select(GovernanceWorkflow)
         .where(GovernanceWorkflow.tenant_id == tenant_id, GovernanceWorkflow.status == "active")
@@ -188,10 +242,10 @@ def _get_active_tenant_workflow(db: Session, tenant_id: str) -> tuple[Governance
 
     ordered_stages = sorted(workflow.stages, key=lambda stage: stage.stage_order)
     first_stage = next((stage for stage in ordered_stages if stage.status == "active"), None)
-    if first_stage is None:
+    if first_stage is None and not allow_empty_stages:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active workflow stages are configured for this tenant.")
 
-    if first_stage.team_id is not None:
+    if first_stage is not None and first_stage.team_id is not None:
         team = db.get(Team, first_stage.team_id)
         if team is None or team.tenant_id != tenant_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The first configured workflow stage references a team outside this tenant.")
@@ -286,6 +340,16 @@ def create_application(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     tenant_id = current_user.tenant_id
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
+    risk_routing = dict((tenant.governance_configuration or {}).get("risk_routing") or {})
+    risk_routing_enabled = bool(risk_routing.get("enabled", False))
+    if risk_routing_enabled and (payload.team_id is not None or payload.current_workflow_stage_id is not None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team and workflow stage are assigned automatically when risk-based routing is enabled.",
+        )
     if not payload.reference_code.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reference code is required.")
 
@@ -295,7 +359,26 @@ def create_application(
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Application reference already exists for this tenant.")
 
-    workflow, first_stage = _get_active_tenant_workflow(db, tenant_id)
+    if risk_routing_enabled:
+        workflow = db.execute(
+            select(GovernanceWorkflow)
+            .where(GovernanceWorkflow.tenant_id == tenant_id, GovernanceWorkflow.status == "active")
+            .order_by(GovernanceWorkflow.created_at)
+        ).scalar_one_or_none()
+        if workflow is None:
+            workflow = GovernanceWorkflow(
+                tenant_id=tenant_id,
+                name="Default Governance Workflow",
+                status="active",
+            )
+            db.add(workflow)
+            db.flush()
+        first_stage = next(
+            (stage for stage in sorted(workflow.stages, key=lambda item: item.stage_order) if stage.status == "active"),
+            None,
+        )
+    else:
+        workflow, first_stage = _get_active_tenant_workflow(db, tenant_id)
     debt_to_income = calculate_debt_to_income(
         payload.existing_monthly_emi,
         payload.monthly_income,
@@ -308,9 +391,32 @@ def create_application(
     )
     route = governance_result["decision"]["final_decision"]
     governance_status = governance_result["governance_status"]
-    assigned_team_id = first_stage.team_id if first_stage.team_id is not None else _validate_team_for_tenant(db, tenant_id, payload.team_id)
-    if payload.team_id and payload.team_id != assigned_team_id and first_stage.team_id is not None:
-        assigned_team_id = first_stage.team_id
+    routing_mode = "RISK_BASED_SINGLE_REVIEW" if risk_routing_enabled else "LEGACY_WORKFLOW"
+    risk_level = str((governance_result.get("risk") or {}).get("level", "MEDIUM")).upper()
+    if not risk_routing_enabled and first_stage is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active workflow stages are configured for this tenant.")
+    assigned_team_id = None if risk_routing_enabled else (
+        first_stage.team_id if first_stage.team_id is not None else _validate_team_for_tenant(db, tenant_id, payload.team_id)
+    )
+
+    target_stage = first_stage
+    if risk_routing_enabled and route == "HUMAN_REVIEW":
+        risk_team_id = _resolve_risk_routing_team_id(db, tenant_id, governance_result)
+        if risk_team_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No active team is configured for {risk_level} risk in this tenant's risk routing settings.",
+            )
+        assigned_team_id = risk_team_id
+        target_stage = _select_risk_review_stage(db, workflow, tenant_id, risk_routing.get("review_stage"))
+    elif route == "HUMAN_REVIEW":
+        assigned_team_id = first_stage.team_id if first_stage.team_id is not None else _validate_team_for_tenant(db, tenant_id, payload.team_id)
+
+    governance_result = {
+        **governance_result,
+        "routing_mode": routing_mode,
+        "risk_level": risk_level,
+    }
 
     application = Application(
         tenant_id=tenant_id,
@@ -319,8 +425,8 @@ def create_application(
         applicant_name=payload.applicant_name.strip(),
         applicant_email=str(payload.applicant_email).lower() if payload.applicant_email else None,
         status="completed" if route == "AUTO_APPROVE" else ("rejected" if route == "REJECT" else "in_review"),
-        current_workflow_stage=first_stage.stage_type,
-        current_workflow_stage_id=first_stage.id,
+        current_workflow_stage=target_stage.stage_type if target_stage is not None else "RISK_BASED_SINGLE_REVIEW",
+        current_workflow_stage_id=target_stage.id if target_stage is not None else None,
         assigned_team_id=assigned_team_id,
         loan_type=payload.loan_type.strip(),
         loan_amount=payload.loan_amount,

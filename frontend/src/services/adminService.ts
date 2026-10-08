@@ -52,6 +52,29 @@ export async function getTeams(token: string) {
   });
 }
 
+export async function getRiskRouting(token: string) {
+  return api.get("/api/v1/admin/risk-routing", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function updateRiskRouting(token: string, payload: {
+  enabled: boolean;
+  default_team_id?: string | null;
+  low_risk_team_id?: string | null;
+  medium_risk_team_id?: string | null;
+  high_risk_team_id?: string | null;
+  review_stage?: "OPERATIONS_REVIEW" | "RISK_REVIEW" | "CREDIT_COMMITTEE_REVIEW" | "FINAL_DECISION";
+}) {
+  return api.put("/api/v1/admin/risk-routing", payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export async function createTeam(token: string, payload: { name: string; description?: string; status?: string }) {
   return api.post("/api/v1/admin/teams", payload, {
     headers: {

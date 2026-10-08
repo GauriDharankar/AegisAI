@@ -312,7 +312,10 @@ class Review(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: generate_id("REV"))
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     application_id: Mapped[str] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), nullable=False)
-    workflow_stage_id: Mapped[str] = mapped_column(ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False)
+    workflow_stage_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("workflow_stages.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     reviewer_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
     comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -326,7 +329,7 @@ class Review(Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="reviews")
     application: Mapped["Application"] = relationship(back_populates="reviews")
-    workflow_stage: Mapped["WorkflowStage"] = relationship(back_populates="reviews")
+    workflow_stage: Mapped[Optional["WorkflowStage"]] = relationship(back_populates="reviews")
     reviewer: Mapped["User"] = relationship(back_populates="reviews")
 
 

@@ -26,6 +26,9 @@ export interface ReviewerApplication {
   existing_monthly_emi?: number | null;
   debt_to_income?: number | null;
   governance_status?: string | null;
+  routing_mode?: string | null;
+  risk_level?: string | null;
+  review_status?: string | null;
   governance_result?: {
     risk?: { level?: string };
     decision?: { original_prediction?: string; model_probability?: number; reason?: string; final_decision?: string };
@@ -43,12 +46,20 @@ export interface ReviewSubmitPayload {
 export interface ReviewSubmitResult {
   id: string;
   application_id: string;
-  workflow_stage: string;
+  workflow_stage?: string | null;
   status: string;
   comments?: string | null;
   created_at: string;
   next_stage?: string | null;
   next_team_id?: string | null;
+  finalized?: boolean;
+  decision?: "approved" | "rejected";
+  decision_id?: string;
+  blockchain?: {
+    success: boolean;
+    status?: string;
+    message?: string;
+  };
 }
 
 export interface FinalDecisionSubmitResult {

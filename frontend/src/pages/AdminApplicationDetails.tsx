@@ -26,6 +26,9 @@ interface ApplicationDetailsRecord {
   assigned_team_name?: string | null;
   current_workflow_stage?: string | null;
   governance_result?: Record<string, any> | null;
+  routing_mode?: string | null;
+  risk_level?: string | null;
+  review_status?: string | null;
 }
 
 const displayValue = (value: unknown) => value === null || value === undefined || value === "" ? "Not available" : String(value);
@@ -95,7 +98,11 @@ export default function AdminApplicationDetails() {
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">{application.status}</span>
-            <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">{application.current_workflow_stage ?? "No workflow stage"}</span>
+            {application.routing_mode === "RISK_BASED_SINGLE_REVIEW" ? (
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">Risk-based single review</span>
+            ) : (
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">{application.current_workflow_stage ?? "No workflow stage"}</span>
+            )}
           </div>
         </div>
 
@@ -111,6 +118,7 @@ export default function AdminApplicationDetails() {
           <Detail label="Existing EMI" value={application.existing_monthly_emi} />
           <Detail label="DTI" value={application.debt_to_income} />
           <Detail label="Assigned team" value={application.assigned_team_name} />
+          {application.routing_mode === "RISK_BASED_SINGLE_REVIEW" && <><Detail label="Risk" value={application.risk_level} /><Detail label="Review" value={application.review_status ?? "PENDING"} /></>}
           <Detail label="AI governance status" value={application.governance_status} />
         </div>
       </section>

@@ -23,7 +23,7 @@ const RESPONSIBILITY_OPTIONS = [
 ];
 
 export default function AdminUsers() {
-  const { token } = useAuth();
+  const { token, user: currentUser } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [name, setName] = useState("");
@@ -87,12 +87,21 @@ export default function AdminUsers() {
     }
 
     const nextStatus = currentStatus === "active" ? "inactive" : "active";
+    const actionLabel = nextStatus === "inactive" ? "Deactivate" : "Activate";
+    const confirmationMessage = nextStatus === "inactive"
+      ? "This user will no longer be able to log in to the organization."
+      : "This user will regain access to the organization.";
+
+    if (!window.confirm(`${actionLabel} User?\n\n${confirmationMessage}`)) {
+      return;
+    }
+
     setUpdatingUserId(userId);
     setError(null);
     try {
       await updateUserStatus(token, userId, nextStatus);
       await loadUsers();
-      showToast("User updated successfully");
+      showToast(nextStatus === "inactive" ? "User deactivated successfully" : "User activated successfully");
     } catch (statusError) {
       setError(getErrorMessage(statusError, "Unable to update user status."));
     } finally {
@@ -228,100 +237,118 @@ export default function AdminUsers() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td className="px-4 py-3">
-                      <div>
-                        <p className="font-medium text-slate-800">{user.name}</p>
-                        <p className="text-xs text-slate-500">{user.created_at ? new Date(user.created_at).toLocaleDateString() : "New user"}</p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{user.email}</td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${user.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
-                        {user.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <div className="space-y-2">
-                        {user.teams?.length ? user.teams.map((team: any) => (
-                          <div key={team.id} className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span>{team.name}</span>
-                              <button
-                                type="button"
-                                onClick={() => void removeTeam(user.id, team.id)}
+                {users.map((user) => {
+                  const isCurrentAdmin = currentUser?.id === user.id;
+                  const statusLabel = (user.status || "active").toUpperCase();
+
+                  return (
+                    <tr key={user.id}>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-medium text-slate-800">{user.name}</p>
+                          <p className="text-xs text-slate-500">{user.created_at ? new Date(user.created_at).toLocaleDateString() : "New user"}</p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{user.email}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full px-2 py-1 text-xs font-medium ${user.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                            {statusLabel}
+                          </span>
+                          {isCurrentAdmin && (
+                            <span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+                              Current Admin
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <div className="space-y-2">
+                          {user.teams?.length ? user.teams.map((team: any) => (
+                            <div key={team.id} className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span>{team.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => void removeTeam(user.id, team.id)}
+                                  disabled={updatingUserId === user.id}
+                                  className="text-xs text-red-600 disabled:opacity-50"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              <select
+                                value={(team.role ?? "Operations Reviewer").toUpperCase().replaceAll(" ", "_")}
                                 disabled={updatingUserId === user.id}
-                                className="text-xs text-red-600 disabled:opacity-50"
+                                onChange={(event) => void updateTeamRole(user.id, team.id, event.target.value)}
+                                className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                                aria-label={`${team.name} responsibility for ${user.name}`}
                               >
-                                Remove
-                              </button>
+                                {RESPONSIBILITY_OPTIONS.filter((option) => option !== "TENANT_ADMIN").map((option) => (
+                                  <option key={option} value={option}>{option.replaceAll("_", " ")}</option>
+                                ))}
+                              </select>
                             </div>
-                            <select
-                              value={(team.role ?? "Operations Reviewer").toUpperCase().replaceAll(" ", "_")}
-                              disabled={updatingUserId === user.id}
-                              onChange={(event) => void updateTeamRole(user.id, team.id, event.target.value)}
-                              className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                              aria-label={`${team.name} responsibility for ${user.name}`}
-                            >
-                              {RESPONSIBILITY_OPTIONS.filter((option) => option !== "TENANT_ADMIN").map((option) => (
-                                <option key={option} value={option}>{option.replaceAll("_", " ")}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )) : <span>No team</span>}
+                          )) : <span>No team</span>}
+                          <select
+                            value={teamRoles[user.id] ?? "OPERATIONS_REVIEWER"}
+                            disabled={updatingUserId === user.id}
+                            onChange={(event) => setTeamRoles((current) => ({ ...current, [user.id]: event.target.value }))}
+                            className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                            aria-label={`Responsibility for ${user.name}'s next team assignment`}
+                          >
+                            {RESPONSIBILITY_OPTIONS.filter((option) => option !== "TENANT_ADMIN").map((option) => (
+                              <option key={option} value={option}>{option.replaceAll("_", " ")}</option>
+                            ))}
+                          </select>
+                          <select
+                            defaultValue=""
+                            disabled={updatingUserId === user.id || teams.length === 0}
+                            onChange={(event) => {
+                              void addTeam(user.id, event.target.value);
+                              event.target.value = "";
+                            }}
+                            className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                          >
+                            <option value="">Assign team...</option>
+                            {teams
+                              .filter((team) => !(user.teams ?? []).some((assigned: any) => assigned.id === team.id))
+                              .map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
                         <select
-                          value={teamRoles[user.id] ?? "OPERATIONS_REVIEWER"}
+                          value={(user.primary_role ?? "").toUpperCase().replaceAll(" ", "_")}
                           disabled={updatingUserId === user.id}
-                          onChange={(event) => setTeamRoles((current) => ({ ...current, [user.id]: event.target.value }))}
-                          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                          aria-label={`Responsibility for ${user.name}'s next team assignment`}
+                          onChange={(event) => void updateResponsibility(user.id, event.target.value)}
+                          className="rounded border border-slate-300 px-2 py-1 text-xs"
                         >
-                          {RESPONSIBILITY_OPTIONS.filter((option) => option !== "TENANT_ADMIN").map((option) => (
-                            <option key={option} value={option}>{option.replaceAll("_", " ")}</option>
-                          ))}
+                          {RESPONSIBILITY_OPTIONS.map((option) => {
+                            const label = option.replaceAll("_", " ");
+                            return <option key={option} value={option}>{label}</option>;
+                          })}
                         </select>
-                        <select
-                          defaultValue=""
-                          disabled={updatingUserId === user.id || teams.length === 0}
-                          onChange={(event) => {
-                            void addTeam(user.id, event.target.value);
-                            event.target.value = "";
-                          }}
-                          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                        >
-                          <option value="">Assign team...</option>
-                          {teams
-                            .filter((team) => !(user.teams ?? []).some((assigned: any) => assigned.id === team.id))
-                            .map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <select
-                        value={(user.primary_role ?? "").toUpperCase().replaceAll(" ", "_")}
-                        disabled={updatingUserId === user.id}
-                        onChange={(event) => void updateResponsibility(user.id, event.target.value)}
-                        className="rounded border border-slate-300 px-2 py-1 text-xs"
-                      >
-                        {RESPONSIBILITY_OPTIONS.map((option) => {
-                          const label = option.replaceAll("_", " ");
-                          return <option key={option} value={option}>{label}</option>;
-                        })}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => void toggleStatus(user.id, user.status)}
-                        disabled={updatingUserId === user.id}
-                        className="rounded border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700"
-                      >
-                        {user.status === "active" ? "Deactivate" : "Activate"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isCurrentAdmin ? (
+                          <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700">
+                            Current Admin
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void toggleStatus(user.id, user.status)}
+                            disabled={updatingUserId === user.id}
+                            className="rounded border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {user.status === "active" ? "Deactivate" : "Activate"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

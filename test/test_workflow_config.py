@@ -59,7 +59,7 @@ def test_admin_can_replace_workflow_with_tenant_specific_stages():
 
     workflow_response = client.put(
         "/api/v1/admin/workflow",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": "Bearer " + token},
         json={
             "name": "Custom Workflow",
             "status": "active",
@@ -93,3 +93,54 @@ def test_workflow_rejects_missing_review_before_final_decision():
     )
     assert response.status_code == 400, response.text
     assert "review stage" in response.json()["detail"].lower()
+
+
+def test_risk_based_workflow_can_omit_final_decision_stage():
+    token, _ = _register_admin()
+
+    routing_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "enabled": True,
+            "review_stage": "RISK_REVIEW",
+        },
+    )
+    assert routing_response.status_code == 200, routing_response.text
+
+    workflow_response = client.put(
+        "/api/v1/admin/workflow",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "name": "Risk-Based Single Review Workflow",
+            "status": "active",
+            "stages": [
+                {"stage_type": "RISK_REVIEW", "team_id": None, "status": "active"},
+            ],
+        },
+    )
+    assert workflow_response.status_code == 200, workflow_response.text
+    assert [stage["stage_type"] for stage in workflow_response.json()["stages"]] == ["RISK_REVIEW"]
+
+
+def test_risk_based_workflow_can_have_zero_stages():
+    token, _ = _register_admin()
+
+    routing_response = client.put(
+        "/api/v1/admin/risk-routing",
+        headers={"Authorization": "Bearer " + token},
+        json={"enabled": True, "review_stage": "RISK_REVIEW"},
+    )
+    assert routing_response.status_code == 200, routing_response.text
+
+    workflow_response = client.put(
+        "/api/v1/admin/workflow",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "name": "Zero Stage Risk Routing",
+            "status": "active",
+            "stages": [],
+        },
+    )
+    assert workflow_response.status_code == 200, workflow_response.text
+    assert workflow_response.json()["stages"] == []
