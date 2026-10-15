@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getRiskRouting, getTeams, getWorkflow, updateWorkflow } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
@@ -38,43 +38,58 @@ export default function AdminWorkflow() {
   });
   const [loading, setLoading] = useState(true);
   const [riskRoutingEnabled, setRiskRoutingEnabled] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const availableStages = useMemo(
     () => workflow.stages.map((stage) => stage.stage_type),
     [workflow.stages]
   );
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!token) {
       return;
     }
 
-    const [teamResponse, workflowResponse, routingResponse] = await Promise.all([
-      getTeams(token),
-      getWorkflow(token),
-      getRiskRouting(token),
-    ]);
+    try {
+      const [teamResponse, workflowResponse, routingResponse] = await Promise.all([
+        getTeams(token),
+        getWorkflow(token),
+        getRiskRouting(token),
+      ]);
 
-    setTeams(teamResponse.data ?? []);
-    setRiskRoutingEnabled(Boolean(routingResponse.data?.risk_routing?.enabled));
-    setWorkflow({
-      name: workflowResponse.data?.name ?? "Default Governance Workflow",
-      status: workflowResponse.data?.status ?? "active",
-      stages: (workflowResponse.data?.stages ?? []).map((stage: any, index: number) => ({
-        id: stage.id,
-        stage_type: stage.stage_type,
-        team_id: stage.team_id ?? null,
-        status: stage.status,
-        stage_order: stage.stage_order ?? index + 1,
-        team_name: stage.team_name,
-      })),
-    });
-    setLoading(false);
-  };
+      setTeams(teamResponse.data ?? []);
+      setRiskRoutingEnabled(Boolean(routingResponse.data?.risk_routing?.enabled));
+      setWorkflow({
+        name: workflowResponse.data?.name ?? "Default Governance Workflow",
+        status: workflowResponse.data?.status ?? "active",
+        stages: (workflowResponse.data?.stages ?? []).map((stage: any, index: number) => ({
+          id: stage.id,
+          stage_type: stage.stage_type,
+          team_id: stage.team_id ?? null,
+          status: stage.status,
+          stage_order: stage.stage_order ?? index + 1,
+          team_name: stage.team_name,
+        })),
+      });
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(getErrorMessage(error, "Unable to load workflow configuration."));
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     void loadData();
-  }, [token]);
+  }, [loadData]);
+
+  const retryWorkflow = () => {
+    setLoading(true);
+    setLoadError(null);
+    void loadData();
+  };
 
   const updateStage = <K extends keyof WorkflowStageRow>(
     index: number,
@@ -105,6 +120,9 @@ export default function AdminWorkflow() {
   };
 
   const removeStage = (index: number) => {
+    if (!window.confirm("Remove this workflow stage from the unsaved configuration?")) {
+      return;
+    }
     setWorkflow((current) => ({
       ...current,
       stages: current.stages
@@ -134,12 +152,31 @@ export default function AdminWorkflow() {
   };
 
   const handleSave = async () => {
-    if (!token) {
+    if (!token || saving) {
       return;
     }
 
+    const activeStages = workflow.stages.filter((stage) => stage.status === "active");
+    const activeFinalStages = activeStages.filter((stage) => stage.stage_type === "FINAL_DECISION");
+    const activeReviewStages = activeStages.filter((stage) => ["OPERATIONS_REVIEW", "RISK_REVIEW", "CREDIT_COMMITTEE_REVIEW"].includes(stage.stage_type));
+    if (workflow.name.trim().length < 2) {
+      setSaveError("Workflow name must contain at least 2 characters.");
+      return;
+    }
+    if (riskRoutingEnabled) {
+      if (activeFinalStages.length > 1 || (workflow.stages.length > 0 && activeReviewStages.length === 0)) {
+        setSaveError("Risk-based workflows allow at most one active final stage and require an active review stage when stages are configured.");
+        return;
+      }
+    } else if (activeFinalStages.length !== 1 || !activeReviewStages.some((stage) => stage.stage_order < activeFinalStages[0].stage_order)) {
+      setSaveError("Sequential workflows require an active review stage before exactly one active final decision stage.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
     const payload = {
-      name: workflow.name.trim() || "Default Governance Workflow",
+      name: workflow.name.trim(),
       status: workflow.status,
       stages: workflow.stages.map((stage, index) => ({
         stage_type: stage.stage_type,
@@ -154,12 +191,14 @@ export default function AdminWorkflow() {
       await loadData();
       showToast("Workflow saved successfully");
     } catch (error) {
-      showToast(getErrorMessage(error, "Unable to save workflow"), "error");
+      setSaveError(getErrorMessage(error, "Unable to save workflow"));
+    } finally {
+      setSaving(false);
     }
   };
 
   if (loading) {
-    return <p>Loading workflow...</p>;
+    return <p className="rounded-xl border border-slate-200 bg-white p-6 text-slate-600">Loading workflow...</p>;
   }
 
   return (
@@ -176,6 +215,13 @@ export default function AdminWorkflow() {
             : "Legacy sequential routing is active. Configure exactly one active Final Decision stage after a review stage."}
         </p>
       </div>
+
+      {(loadError || saveError) && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{loadError ?? saveError}</span>
+          {loadError && <button type="button" onClick={retryWorkflow} disabled={loading} className="font-medium underline disabled:opacity-50">Retry</button>}
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-5 flex items-center justify-between">
@@ -243,6 +289,7 @@ export default function AdminWorkflow() {
             <button
               type="button"
               onClick={addStage}
+              disabled={saving}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
             >
               Add stage
@@ -262,6 +309,7 @@ export default function AdminWorkflow() {
                     <button
                       type="button"
                       onClick={() => moveStage(index, -1)}
+                      disabled={saving || index === 0}
                       className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600"
                     >
                       Up
@@ -269,6 +317,7 @@ export default function AdminWorkflow() {
                     <button
                       type="button"
                       onClick={() => moveStage(index, 1)}
+                      disabled={saving || index === workflow.stages.length - 1}
                       className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600"
                     >
                       Down
@@ -276,6 +325,7 @@ export default function AdminWorkflow() {
                     <button
                       type="button"
                       onClick={() => removeStage(index)}
+                      disabled={saving}
                       className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700"
                     >
                       Remove
@@ -305,7 +355,7 @@ export default function AdminWorkflow() {
                       className="w-full rounded-lg border border-slate-300 px-3 py-2"
                     >
                       <option value="">No team</option>
-                      {teams.map((team) => (
+                      {teams.filter((team) => team.status === "active").map((team) => (
                         <option key={team.id} value={team.id}>{team.name}</option>
                       ))}
                     </select>
@@ -335,9 +385,10 @@ export default function AdminWorkflow() {
           <button
             type="button"
             onClick={handleSave}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            disabled={saving || Boolean(loadError)}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Save workflow
+            {saving ? "Saving…" : "Save workflow"}
           </button>
         </div>
       </div>

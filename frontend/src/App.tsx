@@ -32,8 +32,28 @@ import AdminApplications from "./pages/AdminApplications";
 import AdminApplicationDetails from "./pages/AdminApplicationDetails";
 import AdminAudit from "./pages/AdminAudit";
 import AdminSettings from "./pages/AdminSettings";
+import PlatformAdminLayout from "./layouts/PlatformAdminLayout";
+import PlatformAdminPage from "./pages/PlatformAdminPage";
+import PlatformTenants from "./pages/PlatformTenants";
+import PlatformTenantDetails from "./pages/PlatformTenantDetails";
 
 import ProtectedRoute from "./components/ProtectedRoute";
+import { useAuth } from "./context/AuthContext";
+
+function AuthenticatedHomeRedirect() {
+  const { user, isInitializing } = useAuth();
+
+  if (isInitializing) {
+    return null;
+  }
+
+  return (
+    <Navigate
+      to={user?.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard"}
+      replace
+    />
+  );
+}
 
 function App() {
   useEffect(() => {
@@ -328,23 +348,42 @@ import AdminApplicationDetails from "./pages/AdminApplicationDetails";
         ========================== */}
 
         <Route
-          path="/"
           element={
-            <Navigate
-              to="/dashboard"
-              replace
-            />
+            <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>
+              <PlatformAdminLayout />
+            </ProtectedRoute>
           }
+        >
+          <Route
+            path="platform-admin"
+            element={<PlatformAdminPage />}
+          />
+          <Route
+            path="platform-admin/tenants"
+            element={<PlatformTenants />}
+          />
+          <Route
+            path="platform-admin/tenants/:tenantId"
+            element={<PlatformTenantDetails />}
+          />
+          <Route
+            path="platform-admin/verifications"
+            element={<PlatformAdminPage />}
+          />
+          <Route
+            path="platform-admin/activity"
+            element={<PlatformAdminPage />}
+          />
+        </Route>
+
+        <Route
+          path="/"
+          element={<AuthenticatedHomeRedirect />}
         />
 
         <Route
           path="*"
-          element={
-            <Navigate
-              to="/dashboard"
-              replace
-            />
-          }
+          element={<AuthenticatedHomeRedirect />}
         />
 
       </Routes>

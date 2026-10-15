@@ -18,5 +18,18 @@
     "model_version": "V1",
     "audit_hash": "0x67f3c1d5a47beaa6023565e727e9333df984f83e00284ca757d237f2d2ada2ad",
     "recorded_at": "2026-09-07T16:52:16.529Z"
+  },
+  {
+    "application_id": "APP-3FB90D87C5F5",
+    "tenant_id": "TEN-C4CEF23F926B",
+    "decision_id": "DEC-894DAD2512B2",
+    "governance_id": "GOV-68EEF70F2A49",
+    "final_decision": "rejected",
+    "decision_maker_id": "USR-AAEC1CEC4D2A",
+    "workflow_stage": null,
+    "governance_status": "review_required",
+    "governance_route": "HUMAN_REVIEW",
+    "audit_hash": "0xbcdaa3764111a5ea7ce1e1bff18c3b4d1b52010f85e0a05c16affa7cea4a3c72",
+    "recorded_at": "2026-10-09T03:47:32.967Z"
   }
 ]

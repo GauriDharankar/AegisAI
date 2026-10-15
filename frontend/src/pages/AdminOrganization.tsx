@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Building2 } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -13,8 +13,9 @@ export default function AdminOrganization() {
   const [form, setForm] = useState({ organization_name: "", status: "active" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadOrganization = async () => {
+  const loadOrganization = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -22,23 +23,26 @@ export default function AdminOrganization() {
     const response = await getOrganization(token);
     const next = response.data;
     setOrganization(next);
+    setError(null);
     setForm({
       organization_name: next.organization_name ?? "",
       status: next.status ?? "active",
     });
-  };
+  }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    void loadOrganization().finally(() => setLoading(false));
-  }, [token]);
+    void loadOrganization()
+      .catch((loadError) => setError(getErrorMessage(loadError, "Unable to load organization profile.")))
+      .finally(() => setLoading(false));
+  }, [loadOrganization]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!token) {
+      return;
+    }
+    if (organization?.status === "active" && form.status === "inactive" &&
+      !window.confirm("Deactivate this organization? Users may lose access based on the platform's tenant-status policy.")) {
       return;
     }
 
@@ -58,6 +62,15 @@ export default function AdminOrganization() {
     return <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-600">Loading organization…</div>;
   }
 
+  if (error && !organization) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+        <span>{error}</span>
+        <button type="button" onClick={() => { setLoading(true); void loadOrganization().catch((loadError) => setError(getErrorMessage(loadError, "Unable to load organization profile."))).finally(() => setLoading(false)); }} disabled={loading} className="font-medium underline disabled:opacity-50">Retry</button>
+      </div>
+    );
+  }
+
   if (!organization) {
     return <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-600">No organization profile found.</div>;
   }
@@ -68,6 +81,8 @@ export default function AdminOrganization() {
         <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Tenant Admin</p>
         <h1 className="mt-2 text-3xl font-bold text-slate-900">Organization</h1>
       </div>
+
+      {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       <div className="grid gap-6 xl:grid-cols-[1.3fr_1fr]">
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -108,6 +123,8 @@ export default function AdminOrganization() {
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">Organization name</label>
               <input
+                required
+                minLength={2}
                 value={form.organization_name}
                 onChange={(event) => setForm((current) => ({ ...current, organization_name: event.target.value }))}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5"

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FileText,
   ShieldCheck,
+  Building,
 } from "lucide-react";
 
 import { NavLink, useNavigate } from "react-router-dom";
@@ -147,7 +148,12 @@ const menuItems: MenuItem[] = [
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isMobileMenuOpen: boolean;
+  onMobileClose: () => void;
+}
+
+export default function Sidebar({ isMobileMenuOpen, onMobileClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -165,20 +171,37 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-slate-950 text-white">
+    <>
+      {isMobileMenuOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
+      <aside
+        className={`tenant-sidebar fixed inset-y-0 left-0 z-50 flex h-screen w-[min(84vw,272px)] flex-col bg-[#0b1426] text-white shadow-xl transition-transform duration-200 lg:z-40 lg:w-64 lg:shadow-none ${
+          isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
+      >
 
       {/* =========================
           LOGO
       ========================== */}
 
-      <div className="border-b border-slate-800 px-6 py-6">
-        <h1 className="text-2xl font-bold">
-          AegisAI
-        </h1>
-
-        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-          Multi Tenant AI Governance Engine
-        </p>
+      <div className="border-b border-white/10 px-5 py-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-300/20 bg-teal-300/10 text-teal-200">
+            <ShieldCheck size={21} strokeWidth={1.8} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-[20px] font-semibold tracking-tight text-white">AegisAI</h1>
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Governance workspace
+            </p>
+          </div>
+        </div>
       </div>
 
 
@@ -187,18 +210,23 @@ export default function Sidebar() {
       ========================== */}
 
       {user && (
-        <div className="border-b border-slate-800 px-5 py-4">
-          <p className="truncate text-sm font-medium text-white">
-            {user.tenant_name ?? "Current Organization"}
+        <div className="border-b border-white/10 px-4 py-4">
+          <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+            Organization
           </p>
-
-          <p className="mt-1 text-xs text-slate-400">
-            {user.name}
-          </p>
-
-          <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-slate-500">
-            {user.role.replace("_", " ")}
-          </p>
+          <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] p-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-300/10 text-indigo-200">
+              <Building size={17} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-semibold text-white">
+                {user.tenant_name ?? "Current Organization"}
+              </p>
+              <p className="mt-1 truncate text-[11px] text-slate-400">
+                {user.role.replace("_", " ")}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -208,7 +236,7 @@ export default function Sidebar() {
       ========================== */}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <nav className="space-y-1 p-4">
+        <nav aria-label="Tenant navigation" className="space-y-1.5 p-3">
 
           {visibleMenuItems.map((item) => {
             const Icon = item.icon;
@@ -217,15 +245,16 @@ export default function Sidebar() {
               <NavLink
                 key={item.path}
                 to={item.path}
+                onClick={onMobileClose}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-4 py-3 text-sm transition ${
+                  `tenant-sidebar-link relative flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-[13px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 ${
                     isActive
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-400 hover:bg-slate-900 hover:text-white"
+                      ? "border-teal-300/15 bg-teal-300/10 text-white shadow-sm"
+                      : "border-transparent text-slate-400 hover:bg-white/[0.06] hover:text-white"
                   }`
                 }
               >
-                <Icon size={19} />
+                <Icon size={18} className="shrink-0 opacity-90" />
 
                 <span>{item.name}</span>
               </NavLink>
@@ -240,11 +269,11 @@ export default function Sidebar() {
           LOGOUT
       ========================== */}
 
-      <div className="shrink-0 border-t border-slate-800 p-4">
+      <div className="shrink-0 border-t border-white/10 p-3">
 
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
+          className="flex min-h-10 w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm font-medium text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300"
         >
           <LogOut size={19} />
 
@@ -253,6 +282,7 @@ export default function Sidebar() {
 
       </div>
 
-    </aside>
+      </aside>
+    </>
   );
 }

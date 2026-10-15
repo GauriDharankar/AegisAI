@@ -52,6 +52,26 @@ export async function getTeams(token: string) {
   });
 }
 
+export async function updateTeam(
+  token: string,
+  teamId: string,
+  payload: { name?: string; description?: string; status?: string }
+) {
+  return api.put(`/api/v1/admin/teams/${teamId}`, payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function getApplications(token: string) {
+  return api.get("/api/v1/applications", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export async function getRiskRouting(token: string) {
   return api.get("/api/v1/admin/risk-routing", {
     headers: {
@@ -69,6 +89,25 @@ export async function updateRiskRouting(token: string, payload: {
   review_stage?: "OPERATIONS_REVIEW" | "RISK_REVIEW" | "CREDIT_COMMITTEE_REVIEW" | "FINAL_DECISION";
 }) {
   return api.put("/api/v1/admin/risk-routing", payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function getReviewReminders(token: string) {
+  return api.get("/api/v1/admin/review-reminders", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function updateReviewReminders(
+  token: string,
+  payload: { enabled: boolean; interval_minutes: 15 | 30 | 60 | 120 }
+) {
+  return api.put("/api/v1/admin/review-reminders", payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -167,6 +206,18 @@ export async function createUser(token: string, payload: {
   });
 }
 
+export async function updateUser(
+  token: string,
+  userId: string,
+  payload: { name?: string; email?: string }
+) {
+  return api.patch(`/api/v1/admin/users/${userId}`, payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export async function assignUserResponsibility(
   token: string,
   userId: string,
@@ -179,8 +230,17 @@ export async function assignUserResponsibility(
   });
 }
 
-export async function getAuditLogs(token: string, limit = 100) {
-  return api.get(`/api/v1/admin/audit?limit=${limit}`, {
+export async function getAuditLogs(
+  token: string,
+  params: { limit?: number; offset?: number; action?: string; resource_type?: string; search?: string } = {}
+) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") {
+      query.set(key, String(value));
+    }
+  });
+  return api.get(`/api/v1/admin/audit?${query.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

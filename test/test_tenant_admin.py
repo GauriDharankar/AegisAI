@@ -408,3 +408,183 @@ def test_reviewer_and_unauthenticated_users_are_rejected_for_admin_routes():
 
     no_auth = client.get("/api/v1/admin/users")
     assert no_auth.status_code == 401, no_auth.text
+
+
+def test_user_and_team_edits_persist_and_are_audited():
+    tenant = _register_tenant("EditRecords")
+    user = client.post(
+        "/api/v1/admin/users",
+        headers=_auth_headers(tenant["token"]),
+        json={
+            "name": "Original Name",
+            "email": f"edit_{uuid.uuid4().hex[:8]}@example.com",
+            "password": "SecurePass123",
+        },
+    )
+    team = client.post(
+        "/api/v1/admin/teams",
+        headers=_auth_headers(tenant["token"]),
+        json={"name": "Original Team", "description": "Original description"},
+    )
+    assert user.status_code == 200, user.text
+    assert team.status_code == 200, team.text
+
+    new_email = f"updated_{uuid.uuid4().hex[:8]}@example.com"
+    updated_user = client.patch(
+        f"/api/v1/admin/users/{user.json()['id']}",
+        headers=_auth_headers(tenant["token"]),
+        json={"name": "Updated Name", "email": new_email},
+    )
+    updated_team = client.put(
+        f"/api/v1/admin/teams/{team.json()['id']}",
+        headers=_auth_headers(tenant["token"]),
+        json={"name": "Updated Team", "description": "Updated description", "status": "inactive"},
+    )
+    assert updated_user.status_code == 200, updated_user.text
+    assert updated_user.json()["name"] == "Updated Name"
+    assert updated_user.json()["email"] == new_email
+    assert updated_team.status_code == 200, updated_team.text
+    assert updated_team.json()["name"] == "Updated Team"
+    assert updated_team.json()["status"] == "inactive"
+
+    refreshed_user = client.get(
+        f"/api/v1/admin/users/{user.json()['id']}",
+        headers=_auth_headers(tenant["token"]),
+    )
+    refreshed_team = client.get(
+        f"/api/v1/admin/teams/{team.json()['id']}",
+        headers=_auth_headers(tenant["token"]),
+    )
+    assert refreshed_user.json()["name"] == "Updated Name"
+    assert refreshed_team.json()["description"] == "Updated description"
+
+    audit = client.get("/api/v1/admin/audit", headers=_auth_headers(tenant["token"]))
+    actions = {event["action"] for event in audit.json()}
+    assert {"USER_CREATED", "USER_UPDATED", "TEAM_CREATED", "TEAM_UPDATED"} <= actions
+
+
+def test_user_and_team_edits_validate_input_and_enforce_tenant_scope():
+    tenant_a = _register_tenant("EditScopeA")
+    tenant_b = _register_tenant("EditScopeB")
+    user_b = client.post(
+        "/api/v1/admin/users",
+        headers=_auth_headers(tenant_b["token"]),
+        json={
+            "name": "Tenant B User",
+            "email": f"tenantb_{uuid.uuid4().hex[:8]}@example.com",
+            "password": "SecurePass123",
+        },
+    ).json()
+    team_b = client.post(
+        "/api/v1/admin/teams",
+        headers=_auth_headers(tenant_b["token"]),
+        json={"name": "Tenant B Team"},
+    ).json()
+
+    cross_tenant_user = client.patch(
+        f"/api/v1/admin/users/{user_b['id']}",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"name": "Hijacked Name"},
+    )
+    cross_tenant_team = client.put(
+        f"/api/v1/admin/teams/{team_b['id']}",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"name": "Hijacked Team"},
+    )
+    invalid_user = client.patch(
+        f"/api/v1/admin/users/{tenant_a['user']['id']}",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"name": "  "},
+    )
+    invalid_team = client.put(
+        f"/api/v1/admin/teams/{team_b['id']}",
+        headers=_auth_headers(tenant_b["token"]),
+        json={"name": "  "},
+    )
+    assert cross_tenant_user.status_code == 404
+    assert cross_tenant_team.status_code == 404
+    assert invalid_user.status_code == 400
+    assert invalid_team.status_code == 400
+
+
+def test_audit_filters_pagination_and_configuration_audit_are_persisted():
+    tenant = _register_tenant("AuditFilters")
+    first = client.post(
+        "/api/v1/admin/teams",
+        headers=_auth_headers(tenant["token"]),
+        json={"name": f"Audit Team One {uuid.uuid4().hex[:6]}"},
+    )
+    second = client.post(
+        "/api/v1/admin/teams",
+        headers=_auth_headers(tenant["token"]),
+        json={"name": f"Audit Team Two {uuid.uuid4().hex[:6]}"},
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+    page_one = client.get(
+        "/api/v1/admin/audit?action=TEAM_CREATED&limit=1&offset=0",
+        headers=_auth_headers(tenant["token"]),
+    )
+    page_two = client.get(
+        "/api/v1/admin/audit?action=TEAM_CREATED&limit=1&offset=1",
+        headers=_auth_headers(tenant["token"]),
+    )
+    assert page_one.status_code == 200, page_one.text
+    assert page_two.status_code == 200, page_two.text
+    assert len(page_one.json()) == len(page_two.json()) == 1
+    assert page_one.json()[0]["resource_id"] != page_two.json()[0]["resource_id"]
+    assert all(event["action"] == "TEAM_CREATED" for event in page_one.json() + page_two.json())
+
+    configuration = client.put(
+        "/api/v1/admin/risk-routing",
+        headers=_auth_headers(tenant["token"]),
+        json={"enabled": True, "review_stage": "RISK_REVIEW"},
+    )
+    assert configuration.status_code == 200, configuration.text
+    filtered = client.get(
+        "/api/v1/admin/audit?action=RISK_ROUTING_UPDATED&resource_type=tenant_configuration",
+        headers=_auth_headers(tenant["token"]),
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()
+    assert filtered.json()[0]["tenant_id"] == tenant["tenant"]["id"]
+
+
+def test_review_reminder_settings_persist_and_remain_tenant_scoped():
+    tenant_a = _register_tenant("ReminderA")
+    tenant_b = _register_tenant("ReminderB")
+
+    initial = client.get("/api/v1/admin/review-reminders", headers=_auth_headers(tenant_a["token"]))
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["review_reminders"] == {"enabled": True, "interval_minutes": 30}
+
+    saved = client.put(
+        "/api/v1/admin/review-reminders",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"enabled": False, "interval_minutes": 120},
+    )
+    assert saved.status_code == 200, saved.text
+    refreshed = client.get("/api/v1/admin/review-reminders", headers=_auth_headers(tenant_a["token"]))
+    assert refreshed.json()["review_reminders"] == {"enabled": False, "interval_minutes": 120}
+
+    other_tenant = client.get("/api/v1/admin/review-reminders", headers=_auth_headers(tenant_b["token"]))
+    invalid = client.put(
+        "/api/v1/admin/review-reminders",
+        headers=_auth_headers(tenant_a["token"]),
+        json={"enabled": True, "interval_minutes": 45},
+    )
+    assert other_tenant.status_code == 200, other_tenant.text
+    assert other_tenant.json()["review_reminders"] == {"enabled": True, "interval_minutes": 30}
+    assert invalid.status_code == 422, invalid.text
+
+
+def test_last_active_tenant_admin_cannot_demote_themselves():
+    tenant = _register_tenant("SelfDemotion")
+    response = client.post(
+        f"/api/v1/admin/users/{tenant['user']['id']}/responsibilities",
+        headers=_auth_headers(tenant["token"]),
+        json={"responsibility": "OPERATIONS_REVIEWER"},
+    )
+    assert response.status_code == 400, response.text
+    assert "another active tenant administrator" in response.json()["detail"].lower()

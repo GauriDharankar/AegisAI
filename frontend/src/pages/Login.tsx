@@ -64,7 +64,10 @@ export default function Login({ initialMode = "login" }: { initialMode?: "login"
         sessionStorage.setItem("aegis_session", session.token);
       }
 
-      navigate("/dashboard", { replace: true });
+      navigate(
+        session.user.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard",
+        { replace: true }
+      );
     } catch (submitError) {
       setError(getErrorMessage(submitError, "Invalid email or password."));
     } finally {
@@ -109,7 +112,10 @@ export default function Login({ initialMode = "login" }: { initialMode?: "login"
       };
 
       login(loggedInUser, session.token);
-      navigate("/dashboard", { replace: true });
+      navigate(
+        session.user.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard",
+        { replace: true }
+      );
     } catch (submitError) {
       setError(getErrorMessage(submitError, "Organization registration failed."));
     } finally {

@@ -47,6 +47,14 @@ class Tenant(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: generate_id("TEN"))
     organization_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
+    registration_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    verification_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_reviewer_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    verification_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -56,7 +64,11 @@ class Tenant(Base):
     )
     governance_configuration: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
-    users: Mapped[list["User"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    users: Mapped[list["User"]] = relationship(
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+        foreign_keys="User.tenant_id",
+    )
     roles: Mapped[list["Role"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     permissions: Mapped[list["Permission"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     teams: Mapped[list["Team"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
@@ -72,6 +84,16 @@ class Tenant(Base):
     policies: Mapped[list["Policy"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
 
+class PlatformAdmin(Base):
+    __tablename__ = "platform_admins"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: generate_id("PLA"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="platform_admin")
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
@@ -85,6 +107,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -94,8 +117,9 @@ class User(Base):
     )
     primary_role_id: Mapped[Optional[str]] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"), nullable=True)
 
-    tenant: Mapped["Tenant"] = relationship(back_populates="users")
+    tenant: Mapped["Tenant"] = relationship(back_populates="users", foreign_keys=[tenant_id])
     primary_role: Mapped[Optional["Role"]] = relationship(back_populates="users")
+    platform_admin: Mapped[Optional["PlatformAdmin"]] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     team_memberships: Mapped[list["TeamMember"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     reviews: Mapped[list["Review"]] = relationship(back_populates="reviewer", cascade="all, delete-orphan")
     decisions: Mapped[list["Decision"]] = relationship(back_populates="decision_maker", cascade="all, delete-orphan")
@@ -373,6 +397,24 @@ class AuditLog(Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="audit_logs")
     actor_user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")
+
+
+class PlatformAuditLog(Base):
+    __tablename__ = "platform_audit_logs"
+    __table_args__ = (
+        Index("ix_platform_audit_logs_timestamp_id", "timestamp", "id"),
+        Index("ix_platform_audit_logs_tenant_id", "tenant_id"),
+        Index("ix_platform_audit_logs_actor_user_id", "actor_user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: generate_id("PAUD"))
+    actor_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(180), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    metadata_data: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
 
 
 class HunterAlert(Base):

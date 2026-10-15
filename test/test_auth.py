@@ -1,8 +1,13 @@
 import uuid
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.db.database import SessionLocal
+from app.db.models import User
 from app.main import app
+from app.services.auth_service import create_platform_admin_user, require_platform_admin
 
 client = TestClient(app)
 
@@ -116,6 +121,71 @@ def test_inactive_user_login_fails():
         json={"email": email, "password": password},
     )
     assert response.status_code == 401, response.text
+
+
+def test_platform_admin_has_explicit_super_admin_authorization():
+    email = f"platform_{uuid.uuid4().hex[:8]}@example.com"
+    session = SessionLocal()
+    try:
+        user = create_platform_admin_user(
+            session,
+            full_name="Platform Admin",
+            email=email,
+            password="SecurePass123",
+        )
+
+        assert user.is_platform_admin is True
+        assert require_platform_admin(current_user=user, db=session) == user
+    finally:
+        session.close()
+
+
+def test_tenant_user_is_denied_platform_only_access():
+    org_name = _unique_org_name("Platform Denied")
+    email = f"tenant_guard_{uuid.uuid4().hex[:8]}@example.com"
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": org_name,
+            "name": "Tenant User",
+            "email": email,
+            "password": "SecurePass123",
+            "confirm_password": "SecurePass123",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.email == email.lower()).one()
+        with pytest.raises(HTTPException, match="Platform admin access required."):
+            require_platform_admin(current_user=user, db=session)
+    finally:
+        session.close()
+
+
+def test_tenant_login_regression_after_platform_admin_support():
+    org_name = _unique_org_name("Tenant Regression")
+    email = f"tenant_regression_{uuid.uuid4().hex[:8]}@example.com"
+
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": org_name,
+            "name": "Tenant Regression User",
+            "email": email,
+            "password": "SecurePass123",
+            "confirm_password": "SecurePass123",
+        },
+    )
+    assert register_response.status_code == 200, register_response.text
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "SecurePass123"},
+    )
+    assert login_response.status_code == 200, login_response.text
+    assert login_response.json()["user"]["role"] == "Tenant Admin"
 
 
 def test_protected_route_requires_auth():

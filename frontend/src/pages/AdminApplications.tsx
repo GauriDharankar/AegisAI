@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ExternalLink, FolderOpen, Loader2, Plus } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { getRiskRouting, getTeams } from "../services/adminService";
@@ -58,10 +59,9 @@ const emptyForm = {
   credit_score: "700",
   existing_monthly_emi: "15000",
 };
-import { useNavigate } from "react-router-dom";
-
 export default function AdminApplications() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { token } = useAuth();
   const { showToast } = useToast();
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
@@ -126,6 +126,28 @@ export default function AdminApplications() {
 
   const handleChange = (field: keyof typeof emptyForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const search = (searchParams.get("search") ?? "").trim().toLowerCase();
+  const statusFilter = searchParams.get("status") ?? "";
+  const filteredApplications = applications.filter((application) => {
+    const matchesSearch = !search || [
+      application.reference_code,
+      application.applicant_name,
+      application.applicant_email,
+      application.status,
+      application.assigned_team_name,
+    ].some((value) => String(value ?? "").toLowerCase().includes(search));
+    return matchesSearch && (!statusFilter || application.status.toLowerCase() === statusFilter);
+  });
+  const pageSize = 10;
+  const page = Number(searchParams.get("page") ?? 0);
+  const visibleApplications = filteredApplications.slice(page * pageSize, (page + 1) * pageSize);
+  const updatePage = (nextPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage > 0) next.set("page", String(nextPage));
+    else next.delete("page");
+    setSearchParams(next);
   };
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -204,6 +226,7 @@ export default function AdminApplications() {
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Reference code</label>
             <input
+              required
               value={form.reference_code}
               onChange={(event) => handleChange("reference_code", event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -213,44 +236,46 @@ export default function AdminApplications() {
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Loan type</label>
-            <input value={form.loan_type} onChange={(event) => handleChange("loan_type", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input required value={form.loan_type} onChange={(event) => handleChange("loan_type", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Loan amount</label>
-            <input type="number" min="1" value={form.loan_amount} onChange={(event) => handleChange("loan_amount", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="1" required value={form.loan_amount} onChange={(event) => handleChange("loan_amount", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Tenure (months)</label>
-            <input type="number" min="1" value={form.loan_tenure_months} onChange={(event) => handleChange("loan_tenure_months", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="1" required value={form.loan_tenure_months} onChange={(event) => handleChange("loan_tenure_months", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Loan purpose</label>
-            <input value={form.loan_purpose} onChange={(event) => handleChange("loan_purpose", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input required value={form.loan_purpose} onChange={(event) => handleChange("loan_purpose", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Monthly income</label>
-            <input type="number" min="1" value={form.monthly_income} onChange={(event) => handleChange("monthly_income", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="1" required value={form.monthly_income} onChange={(event) => handleChange("monthly_income", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Employment type</label>
-            <input value={form.employment_type} onChange={(event) => handleChange("employment_type", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input required value={form.employment_type} onChange={(event) => handleChange("employment_type", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Employment years</label>
-            <input type="number" min="0" step="0.1" value={form.employment_years} onChange={(event) => handleChange("employment_years", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="0" step="0.1" required value={form.employment_years} onChange={(event) => handleChange("employment_years", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Credit score</label>
-            <input type="number" min="300" max="850" value={form.credit_score} onChange={(event) => handleChange("credit_score", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="300" max="850" required value={form.credit_score} onChange={(event) => handleChange("credit_score", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Existing monthly EMI</label>
-            <input type="number" min="0" value={form.existing_monthly_emi} onChange={(event) => handleChange("existing_monthly_emi", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="number" min="0" required value={form.existing_monthly_emi} onChange={(event) => handleChange("existing_monthly_emi", event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Applicant name</label>
             <input
+              required
+              minLength={2}
               value={form.applicant_name}
               onChange={(event) => handleChange("applicant_name", event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -307,9 +332,46 @@ export default function AdminApplications() {
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-slate-900">Application list</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-            {applications.length} {applications.length === 1 ? "record" : "records"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              aria-label="Search applications"
+              placeholder="Search applications..."
+              value={searchParams.get("search") ?? ""}
+              onChange={(event) => {
+                setSearchParams((current) => {
+                  const next = new URLSearchParams(current);
+                  if (event.target.value) next.set("search", event.target.value);
+                  else next.delete("search");
+                  next.delete("page");
+                  return next;
+                });
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <select
+              aria-label="Filter applications by status"
+              value={statusFilter}
+              onChange={(event) => {
+                setSearchParams((current) => {
+                  const next = new URLSearchParams(current);
+                  if (event.target.value) next.set("status", event.target.value);
+                  else next.delete("status");
+                  next.delete("page");
+                  return next;
+                });
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="">All statuses</option>
+              {[...new Set(applications.map((application) => application.status))].map((status) => (
+                <option key={status} value={status.toLowerCase()}>{status}</option>
+              ))}
+            </select>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+              {filteredApplications.length} {filteredApplications.length === 1 ? "record" : "records"}
+            </span>
+          </div>
         </div>
 
         {loading ? (
@@ -318,22 +380,23 @@ export default function AdminApplications() {
             Loading applications…
           </div>
         ) : error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
+          <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <span>{error}</span>
+            <button type="button" onClick={() => { setLoading(true); void loadApplications().finally(() => setLoading(false)); }} disabled={loading} className="font-medium underline disabled:opacity-50">Retry</button>
           </div>
-        ) : applications.length === 0 ? (
+        ) : filteredApplications.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
             <div className="mb-4 rounded-full bg-slate-200 p-4 text-slate-700">
               <FolderOpen size={28} />
             </div>
-            <h3 className="text-lg font-semibold text-slate-900">No applications created yet</h3>
+            <h3 className="text-lg font-semibold text-slate-900">{applications.length ? "No applications match your filters" : "No applications created yet"}</h3>
             <p className="mt-2 max-w-md text-sm text-slate-500">
               Use the form above to create the first application for this tenant.
             </p>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {applications.map((application) => (
+            {visibleApplications.map((application) => (
               <div key={application.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -379,6 +442,13 @@ export default function AdminApplications() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+        {!loading && !error && filteredApplications.length > pageSize && (
+          <div className="mt-4 flex items-center justify-between">
+            <button type="button" onClick={() => updatePage(Math.max(0, page - 1))} disabled={page === 0} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Previous</button>
+            <span className="text-sm text-slate-500">Page {page + 1} of {Math.ceil(filteredApplications.length / pageSize)}</span>
+            <button type="button" onClick={() => updatePage(page + 1)} disabled={(page + 1) * pageSize >= filteredApplications.length} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Next</button>
           </div>
         )}
       </div>

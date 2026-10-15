@@ -75,6 +75,36 @@ This repository currently contains the design and architecture phase of the proj
 - [ ] Dashboard
 - [ ] Deployment
 
+## Local development Platform Super Admin provisioning
+
+The first Platform Super Admin can be provisioned only by a trusted local
+maintainer using the one-shot CLI. It is not an API endpoint and does not
+assign a Tenant Admin or Reviewer role. The command requires explicit
+development opt-in, an existing absolute SQLite database path, and typing the
+exact displayed path before it proceeds. It refuses a production environment
+or an already-authorized Platform Super Admin.
+
+After reviewing `app/provision_platform_admin.py` and taking a backup of the
+intended database, run from the repository root in PowerShell:
+
+```powershell
+$env:AEGISAI_ENV = "development"
+$env:AEGISAI_ALLOW_LOCAL_PLATFORM_ADMIN_PROVISIONING = "I_ACKNOWLEDGE_LOCAL_DEVELOPMENT_ONLY"
+$env:AEGISAI_DB_PATH = (Resolve-Path ".\aegisai.db").Path
+.\.venv\Scripts\python.exe -m app.provision_platform_admin
+```
+
+The CLI prompts for the maintainer name, account email, and password (hidden
+input); it never accepts the password as a command-line argument. User,
+platform-admin marker, and an audit event with a null authenticated actor are
+written in one transaction. The event identifies the local CLI and local
+operator account, not an authenticated application user. Clear the opt-in
+environment variable after the command exits:
+
+```powershell
+Remove-Item Env:AEGISAI_ALLOW_LOCAL_PLATFORM_ADMIN_PROVISIONING
+```
+
 ## 🏗️ System Architecture
 
 ### AI Decision Governance Workflow

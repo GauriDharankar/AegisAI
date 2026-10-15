@@ -144,3 +144,37 @@ def test_risk_based_workflow_can_have_zero_stages():
     )
     assert workflow_response.status_code == 200, workflow_response.text
     assert workflow_response.json()["stages"] == []
+
+
+def test_individual_workflow_stage_endpoints_validate_and_persist_tenant_stage():
+    token, _ = _register_admin()
+    headers = {"Authorization": "Bearer " + token}
+
+    created = client.post(
+        "/api/v1/admin/workflow/stages",
+        headers=headers,
+        json={"stage_type": "RISK_REVIEW", "status": "active"},
+    )
+    assert created.status_code == 200, created.text
+    stage_id = created.json()["id"]
+
+    updated = client.put(
+        f"/api/v1/admin/workflow/stages/{stage_id}",
+        headers=headers,
+        json={"stage_type": "OPERATIONS_REVIEW", "status": "active"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["stage_type"] == "OPERATIONS_REVIEW"
+
+    persisted = client.get("/api/v1/admin/workflow", headers=headers)
+    assert any(stage["id"] == stage_id and stage["stage_type"] == "OPERATIONS_REVIEW" for stage in persisted.json()["stages"])
+
+    removed = client.delete(f"/api/v1/admin/workflow/stages/{stage_id}", headers=headers)
+    assert removed.status_code == 200, removed.text
+    audit = client.get("/api/v1/admin/audit?action=workflow_stage_", headers=headers)
+    assert audit.status_code == 200, audit.text
+    assert {event["action"] for event in audit.json()} >= {
+        "workflow_stage_added",
+        "workflow_stage_updated",
+        "workflow_stage_removed",
+    }

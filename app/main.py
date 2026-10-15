@@ -6,6 +6,8 @@ from app.api.applications import router as applications_router
 from app.api.auth import router as auth_router
 from app.api.governance import router as governance_router
 from app.api.hunter import router as hunter_router
+from app.api.policies import router as policies_router
+from app.api.platform_admin import router as platform_admin_router
 from app.api.reviewer import router as reviewer_router
 from app.db.database import init_db
 from app.db.seed import seed_demo_data
@@ -45,6 +47,8 @@ app.include_router(applications_router)
 app.include_router(reviewer_router)
 app.include_router(governance_router)
 app.include_router(hunter_router)
+app.include_router(policies_router)
+app.include_router(platform_admin_router)
 
 
 @app.get("/")

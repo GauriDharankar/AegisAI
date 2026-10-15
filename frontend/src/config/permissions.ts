@@ -4,6 +4,8 @@ export const rolePermissions: Record<
   UserRole,
   string[]
 > = {
+  SUPER_ADMIN: [],
+
   OPERATIONS: [
     "VIEW_LOW_RISK",
     "REVIEW_APPLICATION",

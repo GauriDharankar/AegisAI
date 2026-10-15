@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -75,6 +76,11 @@ class UserCreateRequest(BaseModel):
     tenant_id: str | None = None
 
 
+class UserUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=2)
+    email: EmailStr | None = None
+
+
 class TeamAssignmentRequest(BaseModel):
     team_id: str = Field(..., min_length=1)
     role: str | None = None
@@ -106,6 +112,11 @@ class TenantConfigurationRequest(BaseModel):
     risk_routing: RiskRoutingConfig | None = None
 
 
+class ReviewReminderConfiguration(BaseModel):
+    enabled: bool = True
+    interval_minutes: Literal[15, 30, 60, 120] = 30
+
+
 def _default_auto_approve_configuration() -> dict[str, Any]:
     return AutoApproveConfig().model_dump()
 
@@ -126,6 +137,13 @@ def _tenant_configuration(tenant: Tenant) -> dict[str, Any]:
     risk_defaults.update(risk_routing)
 
     return {"auto_approve": defaults, "risk_routing": risk_defaults}
+
+
+def _tenant_review_reminders(tenant: Tenant) -> dict[str, Any]:
+    saved = (tenant.governance_configuration or {}).get("review_reminders") or {}
+    defaults = ReviewReminderConfiguration().model_dump()
+    defaults.update(saved)
+    return ReviewReminderConfiguration.model_validate(defaults).model_dump()
 
 
 def _validate_risk_routing_config(db: Session, tenant: Tenant, payload: RiskRoutingConfig) -> None:
@@ -254,14 +272,14 @@ def _is_tenant_admin(db: Session, user: User) -> bool:
 
 
 def _count_other_active_tenant_admins(db: Session, tenant_id: str, excluded_user_id: str | None = None) -> int:
-    query = select(User.id).join(Role, User.primary_role_id == Role.id).where(
+    query = select(func.count(User.id)).join(Role, User.primary_role_id == Role.id).where(
         User.tenant_id == tenant_id,
         User.status == "active",
         Role.name == "Tenant Admin",
     )
     if excluded_user_id is not None:
         query = query.where(User.id != excluded_user_id)
-    return db.execute(query).scalars().count()
+    return db.execute(query).scalar_one()
 
 
 def _require_own_team(db: Session, tenant: Tenant, team_id: str) -> Team:
@@ -304,6 +322,43 @@ def _record_workflow_audit(
             },
         )
     )
+
+
+def _record_audit(
+    db: Session,
+    tenant: Tenant,
+    actor_user: User,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    db.add(
+        AuditLog(
+            tenant_id=tenant.id,
+            actor_user_id=actor_user.id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata_data=metadata or {},
+        )
+    )
+
+
+def _commit_unique_change(db: Session, detail: str) -> None:
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from error
+
+
+def _flush_unique_change(db: Session, detail: str) -> None:
+    try:
+        db.flush()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from error
 
 
 def _serialize_workflow_stage(stage: WorkflowStage) -> dict[str, Any]:
@@ -459,7 +514,7 @@ def update_configuration(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     existing = dict(tenant.governance_configuration or {})
     if payload.auto_approve is not None:
         existing["auto_approve"] = payload.auto_approve.model_dump()
@@ -467,6 +522,22 @@ def update_configuration(
         _validate_risk_routing_config(db, tenant, payload.risk_routing)
         existing["risk_routing"] = payload.risk_routing.model_dump()
     tenant.governance_configuration = existing
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "TENANT_CONFIGURATION_UPDATED",
+        "tenant_configuration",
+        tenant.id,
+        {"updated_sections": [
+            section
+            for section, value in (
+                ("auto_approve", payload.auto_approve),
+                ("risk_routing", payload.risk_routing),
+            )
+            if value is not None
+        ]},
+    )
     db.commit()
     db.refresh(tenant)
     return {"tenant_id": tenant.id, **_tenant_configuration(tenant)}
@@ -486,14 +557,55 @@ def update_risk_routing(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     _validate_risk_routing_config(db, tenant, payload)
     existing = dict(tenant.governance_configuration or {})
     existing["risk_routing"] = payload.model_dump()
     tenant.governance_configuration = existing
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "RISK_ROUTING_UPDATED",
+        "tenant_configuration",
+        tenant.id,
+        {"risk_routing": payload.model_dump()},
+    )
     db.commit()
     db.refresh(tenant)
     return {"tenant_id": tenant.id, "risk_routing": _tenant_configuration(tenant)["risk_routing"]}
+
+
+@router.get("/review-reminders")
+def get_review_reminders(
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+) -> dict[str, Any]:
+    _, tenant = admin_context
+    return {"tenant_id": tenant.id, "review_reminders": _tenant_review_reminders(tenant)}
+
+
+@router.put("/review-reminders")
+def update_review_reminders(
+    payload: ReviewReminderConfiguration,
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    current_user, tenant = admin_context
+    configuration = dict(tenant.governance_configuration or {})
+    configuration["review_reminders"] = payload.model_dump()
+    tenant.governance_configuration = configuration
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "REVIEW_REMINDERS_UPDATED",
+        "tenant_configuration",
+        tenant.id,
+        payload.model_dump(),
+    )
+    db.commit()
+    db.refresh(tenant)
+    return {"tenant_id": tenant.id, "review_reminders": _tenant_review_reminders(tenant)}
 
 
 @router.put("/organization")
@@ -502,14 +614,35 @@ def update_organization(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
+    previous_name = tenant.organization_name
+    previous_status = tenant.status
     if payload.organization_name is not None:
-        tenant.organization_name = payload.organization_name.strip()
+        cleaned_name = payload.organization_name.strip()
+        if len(cleaned_name) < 2:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization name must contain at least 2 characters.")
+        tenant.organization_name = cleaned_name
     if payload.status is not None:
         if payload.status not in VALID_TEAM_STATUSES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid organization status.")
         tenant.status = payload.status
-    db.commit()
+    if tenant.organization_name != previous_name or tenant.status != previous_status:
+        _record_audit(
+            db,
+            tenant,
+            current_user,
+            "ORGANIZATION_UPDATED",
+            "organization",
+            tenant.id,
+            {
+                "previous_name": previous_name,
+                "organization_name": tenant.organization_name,
+                "previous_status": previous_status,
+                "status": tenant.status,
+            },
+        )
+    _commit_unique_change(db, "An organization with that name already exists.")
+    db.refresh(tenant)
     return {
         "id": tenant.id,
         "organization_name": tenant.organization_name,
@@ -534,18 +667,31 @@ def create_team(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
+    name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team name must contain at least 2 characters.")
     if payload.status not in VALID_TEAM_STATUSES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team status.")
 
     team = Team(
         tenant_id=tenant.id,
-        name=payload.name.strip(),
+        name=name,
         description=payload.description.strip() if payload.description else None,
         status=payload.status,
     )
     db.add(team)
-    db.commit()
+    _flush_unique_change(db, "A team with that name already exists in this tenant.")
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "TEAM_CREATED",
+        "team",
+        team.id,
+        {"name": team.name, "status": team.status},
+    )
+    _commit_unique_change(db, "A team with that name already exists in this tenant.")
     db.refresh(team)
     return _serialize_team(team)
 
@@ -568,17 +714,54 @@ def update_team(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     team = _require_own_team(db, tenant, team_id)
+    previous = {"name": team.name, "description": team.description, "status": team.status}
     if payload.name is not None:
-        team.name = payload.name.strip()
+        name = payload.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team name must contain at least 2 characters.")
+        team.name = name
     if payload.description is not None:
         team.description = payload.description.strip() or None
     if payload.status is not None:
         if payload.status not in VALID_TEAM_STATUSES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team status.")
+        if payload.status == "inactive" and team.status == "active":
+            in_use = db.execute(
+                select(WorkflowStage.id)
+                .join(GovernanceWorkflow, WorkflowStage.workflow_id == GovernanceWorkflow.id)
+                .where(
+                    WorkflowStage.team_id == team.id,
+                    WorkflowStage.status == "active",
+                    GovernanceWorkflow.status == "active",
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            routing = (tenant.governance_configuration or {}).get("risk_routing", {})
+            routed_team_ids = {
+                routing.get("default_team_id"),
+                routing.get("low_risk_team_id"),
+                routing.get("medium_risk_team_id"),
+                routing.get("high_risk_team_id"),
+            }
+            if in_use or (routing.get("enabled") and team.id in routed_team_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This team is assigned to an active workflow or risk route. Reassign it before deactivation.",
+                )
         team.status = payload.status
-    db.commit()
+    if previous != {"name": team.name, "description": team.description, "status": team.status}:
+        _record_audit(
+            db,
+            tenant,
+            current_user,
+            "TEAM_UPDATED",
+            "team",
+            team.id,
+            {"previous": previous, "current": {"name": team.name, "description": team.description, "status": team.status}},
+        )
+    _commit_unique_change(db, "A team with that name already exists in this tenant.")
     return _serialize_team(team)
 
 
@@ -612,8 +795,13 @@ def create_or_update_workflow(
     current_user, tenant = admin_context
     workflow = _ensure_tenant_workflow(db, tenant.id)
     if payload.name is not None:
-        workflow.name = payload.name.strip()
+        name = payload.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow name must contain at least 2 characters.")
+        workflow.name = name
     if payload.status:
+        if payload.status not in VALID_TEAM_STATUSES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workflow status.")
         workflow.status = payload.status
 
     if payload.stages is not None:
@@ -625,7 +813,6 @@ def create_or_update_workflow(
             stage.stage_order = order_index
         _validate_workflow(db, workflow, tenant)
 
-    db.commit()
     _record_workflow_audit(db, tenant, current_user, "workflow_updated", workflow, {"changes": "workflow_configured"})
     db.commit()
     return _serialize_workflow(workflow)
@@ -671,9 +858,8 @@ def add_workflow_stage(
     workflow.stages.append(inserted_stage)
     for order_index, stage in enumerate(sorted(workflow.stages, key=lambda item: item.stage_order), start=1):
         stage.stage_order = order_index
-    _validate_workflow(workflow, tenant)
+    _validate_workflow(db, workflow, tenant)
 
-    db.commit()
     _record_workflow_audit(db, tenant, current_user, "workflow_stage_added", workflow, {"stage_type": inserted_stage.stage_type})
     db.commit()
     return _serialize_workflow_stage(inserted_stage)
@@ -712,9 +898,8 @@ def update_workflow_stage(
 
     for order_index, item in enumerate(sorted(workflow.stages, key=lambda current: current.stage_order), start=1):
         item.stage_order = order_index
-    _validate_workflow(workflow, tenant)
+    _validate_workflow(db, workflow, tenant)
 
-    db.commit()
     _record_workflow_audit(db, tenant, current_user, "workflow_stage_updated", workflow, {"stage_id": stage.id, "stage_type": stage.stage_type})
     db.commit()
     return _serialize_workflow_stage(stage)
@@ -735,10 +920,9 @@ def delete_workflow_stage(
     workflow.stages.remove(stage)
     for order_index, item in enumerate(sorted(workflow.stages, key=lambda current: current.stage_order), start=1):
         item.stage_order = order_index
-    _validate_workflow(workflow, tenant)
+    _validate_workflow(db, workflow, tenant)
 
     db.delete(stage)
-    db.commit()
     _record_workflow_audit(db, tenant, current_user, "workflow_stage_removed", workflow, {"stage_id": stage_id})
     db.commit()
     return {"message": "Workflow stage removed."}
@@ -757,16 +941,31 @@ def list_users(
 @router.get("/audit")
 def list_audit_logs(
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    action: str | None = Query(default=None, max_length=100),
+    resource_type: str | None = Query(default=None, max_length=100),
+    search: str | None = Query(default=None, max_length=200),
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    current_user, _ = admin_context
-    logs = db.execute(
-        select(AuditLog)
-        .where(AuditLog.tenant_id == current_user.tenant_id)
-        .order_by(AuditLog.timestamp.desc())
-        .limit(limit)
-    ).scalars().all()
+    _, tenant = admin_context
+    query = select(AuditLog).where(AuditLog.tenant_id == tenant.id)
+    if action:
+        query = query.where(AuditLog.action.ilike(f"%{action.strip()}%"))
+    if resource_type:
+        query = query.where(AuditLog.resource_type.ilike(f"%{resource_type.strip()}%"))
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.join(AuditLog.actor_user, isouter=True).where(
+            or_(
+                AuditLog.action.ilike(term),
+                AuditLog.resource_type.ilike(term),
+                AuditLog.resource_id.ilike(term),
+                User.name.ilike(term),
+                User.email.ilike(term),
+            )
+        )
+    logs = db.execute(query.order_by(AuditLog.timestamp.desc()).offset(offset).limit(limit)).scalars().all()
     return [
         {
             "id": log.id,
@@ -795,15 +994,51 @@ def get_user(
     return _serialize_user(user, db)
 
 
+@router.patch("/users/{user_id}")
+def update_user(
+    user_id: str,
+    payload: UserUpdateRequest,
+    admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    current_user, tenant = admin_context
+    user = _require_own_user(db, tenant, user_id)
+    previous = {"name": user.name, "email": user.email}
+
+    if payload.name is not None:
+        name = payload.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User name must contain at least 2 characters.")
+        user.name = name
+    if payload.email is not None:
+        email = normalize_email(str(payload.email))
+        existing = db.execute(
+            select(User).where(User.tenant_id == tenant.id, User.email == email, User.id != user.id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with that email already exists in this tenant.")
+        user.email = email
+
+    current = {"name": user.name, "email": user.email}
+    if current != previous:
+        _record_audit(db, tenant, current_user, "USER_UPDATED", "user", user.id, {"previous": previous, "current": current})
+    _commit_unique_change(db, "A user with that email already exists in this tenant.")
+    db.refresh(user)
+    return _serialize_user(user, db)
+
+
 @router.post("/users")
 def create_user(
     payload: UserCreateRequest,
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     if payload.status not in VALID_TEAM_STATUSES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user status.")
+    name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User name must contain at least 2 characters.")
 
     email = normalize_email(str(payload.email))
     existing = db.execute(select(User).where(User.tenant_id == tenant.id, User.email == email)).scalar_one_or_none()
@@ -826,14 +1061,14 @@ def create_user(
     primary_role = _ensure_role_for_tenant(db, tenant.id, primary_role_name)
     user = User(
         tenant_id=tenant.id,
-        name=payload.name.strip(),
+        name=name,
         email=email,
         password_hash=hash_password(payload.password),
         status=payload.status,
         primary_role_id=primary_role.id,
     )
     db.add(user)
-    db.flush()
+    _flush_unique_change(db, "A user with that email already exists in this tenant.")
 
     for team_id in payload.team_ids:
         team = _require_own_team(db, tenant, team_id)
@@ -844,10 +1079,16 @@ def create_user(
         ).scalar_one_or_none() is None:
             db.add(TeamMember(user_id=user.id, team_id=team.id, role_id=primary_role.id))
 
-    if payload.tenant_id and payload.tenant_id != tenant.id:
-        payload.tenant_id = tenant.id
-
-    db.commit()
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "USER_CREATED",
+        "user",
+        user.id,
+        {"name": user.name, "email": user.email, "status": user.status, "primary_role": primary_role.name},
+    )
+    _commit_unique_change(db, "A user with that email already exists in this tenant.")
     db.refresh(user)
     return _serialize_user(user, db)
 
@@ -887,27 +1128,24 @@ def update_user_status(
                 )
 
     user.status = next_status
-    db.commit()
-    db.refresh(user)
-
     action = "USER_DEACTIVATED" if next_status == "inactive" else "USER_ACTIVATED"
-    db.add(
-        AuditLog(
-            tenant_id=tenant.id,
-            actor_user_id=current_user.id,
-            action=action,
-            resource_type="user",
-            resource_id=user.id,
-            metadata_data={
-                "target_user_id": user.id,
-                "target_user_name": user.name,
-                "target_user_email": user.email,
-                "previous_status": previous_status,
-                "new_status": next_status,
-            },
-        )
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        action,
+        "user",
+        user.id,
+        {
+            "target_user_id": user.id,
+            "target_user_name": user.name,
+            "target_user_email": user.email,
+            "previous_status": previous_status,
+            "new_status": next_status,
+        },
     )
     db.commit()
+    db.refresh(user)
     return _serialize_user(user, db)
 
 
@@ -918,14 +1156,17 @@ def assign_team_to_user(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     user = _require_own_user(db, tenant, user_id)
     team = _require_own_team(db, tenant, payload.team_id)
     if team.status != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team is inactive and cannot accept new assignments.")
 
     role_name = payload.role if payload.role else (db.get(Role, user.primary_role_id).name if db.get(Role, user.primary_role_id) else "Operations Reviewer")
-    assignment_role = _ensure_role_for_tenant(db, tenant.id, _canonicalize_responsibility(role_name) or role_name)
+    canonical_role = _canonicalize_responsibility(role_name)
+    if canonical_role is None or canonical_role == "Tenant Admin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team responsibility assignment.")
+    assignment_role = _ensure_role_for_tenant(db, tenant.id, canonical_role)
 
     membership = db.execute(
         select(TeamMember).where(TeamMember.user_id == user.id, TeamMember.team_id == team.id)
@@ -936,6 +1177,15 @@ def assign_team_to_user(
     else:
         membership.role_id = assignment_role.id
 
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "TEAM_MEMBER_ASSIGNED",
+        "team",
+        team.id,
+        {"user_id": user.id, "user_email": user.email, "role": assignment_role.name},
+    )
     db.commit()
     return _serialize_team(team)
 
@@ -947,7 +1197,7 @@ def remove_team_from_user(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     user = _require_own_user(db, tenant, user_id)
     team = _require_own_team(db, tenant, team_id)
     membership = db.execute(
@@ -956,6 +1206,15 @@ def remove_team_from_user(
     if membership is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
     db.delete(membership)
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "TEAM_MEMBER_REMOVED",
+        "team",
+        team.id,
+        {"user_id": user.id, "user_email": user.email},
+    )
     db.commit()
     return {"message": "Team assignment removed."}
 
@@ -967,7 +1226,7 @@ def assign_responsibility(
     admin_context: tuple[User, Tenant] = Depends(_require_tenant_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _, tenant = admin_context
+    current_user, tenant = admin_context
     user = _require_own_user(db, tenant, user_id)
     role_name = _canonicalize_responsibility(payload.responsibility)
     if role_name is None:
@@ -975,15 +1234,32 @@ def assign_responsibility(
 
     role = _ensure_role_for_tenant(db, tenant.id, role_name)
     existing_roles = {r.name for r in db.execute(select(Role).where(Role.tenant_id == tenant.id)).scalars().all()}
+    previous_role = db.get(Role, user.primary_role_id) if user.primary_role_id else None
+    if (
+        user.id == current_user.id
+        and previous_role is not None
+        and previous_role.name == "Tenant Admin"
+        and role_name != "Tenant Admin"
+        and _count_other_active_tenant_admins(db, tenant.id, excluded_user_id=user.id) == 0
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assign another active tenant administrator before changing your own responsibility.",
+        )
     warnings = _responsibility_warnings({
         (db.get(Role, user.primary_role_id).name if db.get(Role, user.primary_role_id) else "Operations Reviewer")
     }, role_name)
 
-    if user.primary_role_id is None or db.get(Role, user.primary_role_id) is None:
-        user.primary_role_id = role.id
-    else:
-        user.primary_role_id = role.id
-
+    user.primary_role_id = role.id
+    _record_audit(
+        db,
+        tenant,
+        current_user,
+        "USER_RESPONSIBILITY_UPDATED",
+        "user",
+        user.id,
+        {"previous_responsibility": previous_role.name if previous_role else None, "responsibility": role_name},
+    )
     db.commit()
     return {
         "id": user.id,

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import AuditLog, Role, TeamMember, Tenant, User
+from app.db.models import AuditLog, PlatformAdmin, Role, TeamMember, Tenant, User
 from app.services.auth_service import (
     create_session_token,
     create_tenant_admin_user,
@@ -139,11 +139,25 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             detail="Your account is inactive. Contact your organization administrator.",
         )
 
+    platform_admin_record = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
+    ).scalar_one_or_none()
+    if not (user.is_platform_admin and platform_admin_record is not None):
+        tenant = db.get(Tenant, user.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+        if tenant.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your organization account is inactive. Contact platform support.",
+            )
+
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
     role = db.get(Role, user.primary_role_id)
-    token = create_session_token(user, role_name=role.name if role else "Tenant Admin")
+    token_role = "Super Admin" if user.is_platform_admin else (role.name if role else "Tenant Admin")
+    token = create_session_token(user, role_name=token_role)
     assignments = _serialize_user_assignments(db, user)
 
     return {
@@ -153,9 +167,9 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             "id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": (role.name if role else "Tenant Admin"),
+            "role": token_role,
             "tenant_id": user.tenant_id,
-            "level": 4 if (role and role.name == "Tenant Admin") else 2,
+            "level": 5 if user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
             **assignments,
         },
         "tenant": {
@@ -184,7 +198,8 @@ def refresh_session(
     db: Session = Depends(get_db),
 ):
     role = db.get(Role, current_user.primary_role_id)
-    token = create_session_token(current_user, role_name=role.name if role else "Tenant Admin")
+    token_role = "Super Admin" if current_user.is_platform_admin else (role.name if role else "Tenant Admin")
+    token = create_session_token(current_user, role_name=token_role)
     tenant = db.get(Tenant, current_user.tenant_id)
     assignments = _serialize_user_assignments(db, current_user)
     return {
@@ -194,10 +209,10 @@ def refresh_session(
             "id": current_user.id,
             "name": current_user.name,
             "email": current_user.email,
-            "role": role.name if role else "Tenant Admin",
+            "role": token_role,
             "tenant_id": current_user.tenant_id,
             "tenant_name": tenant.organization_name if tenant else None,
-            "level": 4 if (role and role.name == "Tenant Admin") else 2,
+            "level": 5 if current_user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
             **assignments,
         },
     }
@@ -211,15 +226,16 @@ def get_current_identity(
     tenant = db.get(Tenant, current_user.tenant_id)
     role = db.get(Role, current_user.primary_role_id)
     assignments = _serialize_user_assignments(db, current_user)
+    token_role = "Super Admin" if current_user.is_platform_admin else (role.name if role else "Tenant Admin")
 
     return {
         "id": current_user.id,
         "name": current_user.name,
         "email": current_user.email,
-        "role": role.name if role else "Tenant Admin",
+        "role": token_role,
         "tenant_id": current_user.tenant_id,
         "tenant_name": tenant.organization_name if tenant else None,
-        "level": 4 if (role and role.name == "Tenant Admin") else 2,
+        "level": 5 if current_user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
         **assignments,
     }
 

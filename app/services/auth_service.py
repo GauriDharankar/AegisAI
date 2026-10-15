@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import Permission, Role, Tenant, Team, User, WorkflowStage, GovernanceWorkflow
+from app.db.models import PlatformAdmin, Permission, Role, Tenant, Team, User, WorkflowStage, GovernanceWorkflow
 
 AUTH_SECRET = os.getenv("AEGISAI_AUTH_SECRET", "aegisai-local-dev-secret-change-me")
 SESSION_TTL_SECONDS = 60 * 60 * 8
@@ -146,6 +146,19 @@ def get_current_user(
             detail="Your account is inactive. Contact your organization administrator.",
         )
 
+    platform_admin_record = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
+    ).scalar_one_or_none()
+    if not (user.is_platform_admin and platform_admin_record is not None):
+        tenant = db.get(Tenant, user.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+        if tenant.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your organization account is inactive. Contact platform support.",
+            )
+
     return user
 
 
@@ -157,6 +170,22 @@ def get_current_tenant(
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
     return tenant
+
+
+def require_platform_admin(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    is_platform_admin = bool(current_user.is_platform_admin)
+    has_platform_record = (
+        db.execute(select(PlatformAdmin).where(PlatformAdmin.user_id == current_user.id)).scalar_one_or_none() is not None
+    )
+    if not is_platform_admin or not has_platform_record:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform admin access required.",
+        )
+    return current_user
 
 
 def normalize_email(email: str) -> str:
@@ -224,6 +253,63 @@ def _ensure_default_workflow(session: Session, tenant_id: str) -> GovernanceWork
             )
             session.add(stage)
     return workflow
+
+
+def create_platform_admin_user(
+    session: Session,
+    *,
+    full_name: str,
+    email: str,
+    password: str,
+    tenant_id: str | None = None,
+) -> User:
+    normalized_email = normalize_email(email)
+
+    if not full_name.strip():
+        raise ValueError("Full name is required.")
+    if not normalized_email or "@" not in normalized_email:
+        raise ValueError("A valid email is required.")
+
+    validate_password(password)
+
+    existing_user = session.execute(
+        select(User).where(User.email == normalized_email)
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        raise ValueError("A user with that email already exists.")
+
+    resolved_tenant_id = tenant_id
+    if resolved_tenant_id is None:
+        platform_tenant = session.execute(
+            select(Tenant).where(Tenant.organization_name == "Platform Administration")
+        ).scalar_one_or_none()
+        if platform_tenant is None:
+            platform_tenant = Tenant(organization_name="Platform Administration", status="active")
+            session.add(platform_tenant)
+            session.flush()
+        resolved_tenant_id = platform_tenant.id
+
+    user = User(
+        tenant_id=resolved_tenant_id,
+        name=full_name.strip(),
+        email=normalized_email,
+        password_hash=hash_password(password),
+        status="active",
+        is_platform_admin=True,
+        primary_role_id=None,
+    )
+    session.add(user)
+    session.flush()
+
+    platform_admin = session.execute(
+        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
+    ).scalar_one_or_none()
+    if platform_admin is None:
+        session.add(PlatformAdmin(user_id=user.id))
+        session.flush()
+
+    user.is_platform_admin = True
+    return user
 
 
 def create_tenant_admin_user(session: Session, organization_name: str, full_name: str, email: str, password: str) -> tuple[Tenant, User, Role]:

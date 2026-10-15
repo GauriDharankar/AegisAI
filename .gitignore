@@ -45,3 +45,6 @@ frontend/*-output.txt
 
 # General logs
 *.log
+aegisai.backup-before-platform-admin.db
+
+aegisai.backup-before-platform-admin.db

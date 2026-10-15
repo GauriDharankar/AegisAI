@@ -32,6 +32,11 @@ MIGRATION_COLUMNS = [
 
 TENANT_MIGRATION_COLUMNS = [
     ("governance_configuration", "JSON", "{}"),
+    ("verification_status", "TEXT", "PENDING"),
+    ("registration_number", "VARCHAR(128)", None),
+    ("verification_reviewed_at", "DATETIME", None),
+    ("verification_reviewer_id", "TEXT REFERENCES users(id) ON DELETE SET NULL", None),
+    ("verification_reason", "TEXT", None),
 ]
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -167,8 +172,32 @@ def migrate_sqlite_tenant_schema(target_engine=None) -> None:
         for column_name, column_type, default_value in TENANT_MIGRATION_COLUMNS:
             if column_name in existing_columns:
                 continue
+            if default_value is None:
+                column_definition = column_type
+            else:
+                column_definition = f"{column_type} NOT NULL DEFAULT '{default_value}'"
             connection.exec_driver_sql(
-                f"ALTER TABLE tenants ADD COLUMN {column_name} {column_type} NOT NULL DEFAULT '{default_value}'"
+                f"ALTER TABLE tenants ADD COLUMN {column_name} {column_definition}"
+            )
+
+
+def migrate_sqlite_user_schema(target_engine=None) -> None:
+    bind = target_engine or engine
+    with bind.begin() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "users" not in tables:
+            return
+
+        existing_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(users)").fetchall()
+        }
+        if "is_platform_admin" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN is_platform_admin BOOLEAN NOT NULL DEFAULT 0"
             )
 
 
@@ -233,6 +262,8 @@ def init_db() -> None:
         GovernanceWorkflow,
         HunterAlert,
         Permission,
+        PlatformAdmin,
+        PlatformAuditLog,
         Policy,
         PolicyVersion,
         Review,
@@ -256,4 +287,5 @@ def init_db() -> None:
 
     migrate_sqlite_application_schema(engine)
     migrate_sqlite_tenant_schema(engine)
+    migrate_sqlite_user_schema(engine)
     migrate_sqlite_review_schema(engine)

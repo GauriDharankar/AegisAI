@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { UserPlus } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { getErrorMessage } from "../services/errorMessage";
@@ -10,6 +11,7 @@ import {
   getTeams,
   getUsers,
   removeUserTeam,
+  updateUser,
   updateUserStatus,
 } from "../services/adminService";
 import { useToast } from "../components/ToastProvider";
@@ -28,14 +30,19 @@ export default function AdminUsers() {
   const [users, setUsers] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("SecurePass123");
+  const [password, setPassword] = useState("");
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [teamRoles, setTeamRoles] = useState<Record<string, string>>({});
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "" });
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -43,29 +50,32 @@ export default function AdminUsers() {
     const [usersResponse, teamsResponse] = await Promise.all([getUsers(token), getTeams(token)]);
     setUsers(usersResponse.data ?? []);
     setTeams(teamsResponse.data ?? []);
-  };
+    setLoadError(false);
+    setError(null);
+  }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      return;
-    }
-
     void loadUsers()
-      .catch((loadError) => setError(getErrorMessage(loadError, "Unable to load users and teams.")))
+      .catch((loadFailure) => {
+        setLoadError(true);
+        setError(getErrorMessage(loadFailure, "Unable to load users and teams."));
+      })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [loadUsers]);
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!token) {
+    if (!token || !name.trim() || !email.trim() || password.length < 8 || creating) {
+      setError("Enter a name, valid email address, and password of at least 8 characters.");
       return;
     }
 
     setError(null);
+    setCreating(true);
     try {
       await createUser(token, {
-        name,
-        email,
+        name: name.trim(),
+        email: email.trim(),
         password,
         status: "active",
         responsibilities: ["OPERATIONS_REVIEWER"],
@@ -73,11 +83,32 @@ export default function AdminUsers() {
 
       setName("");
       setEmail("");
-      setPassword("SecurePass123");
+      setPassword("");
       await loadUsers();
       showToast("User created successfully");
     } catch (createError) {
       setError(getErrorMessage(createError, "Unable to create the user."));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const saveUser = async (userId: string) => {
+    if (!token || !editForm.name.trim() || !editForm.email.trim()) {
+      setError("Name and email are required.");
+      return;
+    }
+    setUpdatingUserId(userId);
+    setError(null);
+    try {
+      await updateUser(token, userId, { name: editForm.name.trim(), email: editForm.email.trim() });
+      await loadUsers();
+      setEditingUserId(null);
+      showToast("User updated successfully");
+    } catch (updateError) {
+      setError(getErrorMessage(updateError, "Unable to update the user."));
+    } finally {
+      setUpdatingUserId(null);
     }
   };
 
@@ -152,6 +183,9 @@ export default function AdminUsers() {
     if (!token) {
       return;
     }
+    if (!window.confirm("Remove this user from the selected team?")) {
+      return;
+    }
 
     setUpdatingUserId(userId);
     setError(null);
@@ -202,28 +236,78 @@ export default function AdminUsers() {
         <div className="grid gap-4 md:grid-cols-3">
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Full name</label>
-            <input value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input required minLength={2} value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Email</label>
-            <input value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Password</label>
-            <input value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
           </div>
         </div>
-        <button type="submit" className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">Add user</button>
+        <button type="submit" disabled={creating} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">{creating ? "Adding…" : "Add user"}</button>
       </form>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{error}</span>
+          {loadError && <button type="button" onClick={() => { setLoading(true); setLoadError(false); void loadUsers().catch((loadFailure) => { setLoadError(true); setError(getErrorMessage(loadFailure, "Unable to load users and teams.")); }).finally(() => setLoading(false)); }} disabled={loading} className="font-medium underline disabled:opacity-50">Retry loading</button>}
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-xl font-semibold text-slate-900">User directory</h2>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <h2 className="text-xl font-semibold text-slate-900">User directory</h2>
+          <div className="flex gap-2">
+            <input
+              type="search"
+              aria-label="Search users"
+              placeholder="Search users..."
+              value={searchParams.get("search") ?? ""}
+              onChange={(event) => setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                if (event.target.value) next.set("search", event.target.value);
+                else next.delete("search");
+                return next;
+              })}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <select
+              aria-label="Filter users by status"
+              value={searchParams.get("status") ?? ""}
+              onChange={(event) => setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                if (event.target.value) next.set("status", event.target.value);
+                else next.delete("status");
+                return next;
+              })}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
 
         {loading ? (
           <div className="text-slate-600">Loading users…</div>
         ) : (
+          (() => {
+            const query = (searchParams.get("search") ?? "").trim().toLowerCase();
+            const statusFilter = searchParams.get("status");
+            const filteredUsers = users.filter((candidate) => {
+              const matchesSearch = !query || [candidate.name, candidate.email, candidate.primary_role, ...(candidate.teams ?? []).map((team: any) => team.name)]
+                .some((value) => String(value ?? "").toLowerCase().includes(query));
+              return matchesSearch && (!statusFilter || candidate.status === statusFilter);
+            });
+            return filteredUsers.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                {users.length === 0 ? "No users found. Add a user to get started." : "No users match these filters."}
+              </div>
+            ) : (
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-[760px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-slate-600">
@@ -237,19 +321,33 @@ export default function AdminUsers() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {users.map((user) => {
+                {filteredUsers.map((user) => {
                   const isCurrentAdmin = currentUser?.id === user.id;
                   const statusLabel = (user.status || "active").toUpperCase();
 
                   return (
                     <tr key={user.id}>
                       <td className="px-4 py-3">
-                        <div>
+                        {editingUserId === user.id ? (
+                          <div className="space-y-2">
+                            <input aria-label={`Name for ${user.email}`} value={editForm.name} onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} className="w-full rounded border border-slate-300 px-2 py-1" />
+                            <input aria-label={`Email for ${user.name}`} type="email" value={editForm.email} onChange={(event) => setEditForm((current) => ({ ...current, email: event.target.value }))} className="w-full rounded border border-slate-300 px-2 py-1" />
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => void saveUser(user.id)} disabled={updatingUserId === user.id} className="text-xs font-medium text-teal-700 disabled:opacity-50">Save</button>
+                              <button type="button" onClick={() => setEditingUserId(null)} disabled={updatingUserId === user.id} className="text-xs text-slate-500">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
                           <p className="font-medium text-slate-800">{user.name}</p>
                           <p className="text-xs text-slate-500">{user.created_at ? new Date(user.created_at).toLocaleDateString() : "New user"}</p>
-                        </div>
+                          </div>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{user.email}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {editingUserId === user.id ? "Editing above" : user.email}
+                        {editingUserId !== user.id && <button type="button" onClick={() => { setEditingUserId(user.id); setEditForm({ name: user.name, email: user.email }); }} disabled={updatingUserId === user.id} className="ml-2 text-xs font-medium text-teal-700">Edit</button>}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className={`rounded-full px-2 py-1 text-xs font-medium ${user.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
@@ -311,7 +409,7 @@ export default function AdminUsers() {
                             className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
                           >
                             <option value="">Assign team...</option>
-                            {teams
+                            {teams.filter((team) => team.status === "active")
                               .filter((team) => !(user.teams ?? []).some((assigned: any) => assigned.id === team.id))
                               .map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
                           </select>
@@ -352,6 +450,8 @@ export default function AdminUsers() {
               </tbody>
             </table>
           </div>
+            );
+          })()
         )}
       </div>
     </div>

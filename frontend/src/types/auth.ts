@@ -1,4 +1,5 @@
 export type UserRole =
+  | "SUPER_ADMIN"
   | "OPERATIONS"
   | "RISK_OFFICER"
   | "CREDIT_COMMITTEE"
@@ -9,7 +10,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  level: 1 | 2 | 3 | 4;
+  level: 1 | 2 | 3 | 4 | 5;
   tenant_id?: string;
   tenant_name?: string;
   responsibilities?: string[];

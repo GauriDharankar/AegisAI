@@ -39,6 +39,10 @@ export interface AuthSession {
 const mapRole = (role: string): UserRole => {
   const normalized = role.toUpperCase().replace(/\s+/g, "_");
 
+  if (normalized === "SUPER_ADMIN") {
+    return "SUPER_ADMIN";
+  }
+
   if (normalized.includes("COMMITTEE")) {
     return "CREDIT_COMMITTEE";
   }
@@ -54,8 +58,12 @@ const mapRole = (role: string): UserRole => {
   return "OPERATIONS";
 };
 
-const mapLevel = (role: string): 1 | 2 | 3 | 4 => {
+const mapLevel = (role: string): 1 | 2 | 3 | 4 | 5 => {
   const normalized = role.toUpperCase();
+
+  if (normalized === "SUPER ADMIN" || normalized === "SUPER_ADMIN") {
+    return 5;
+  }
 
   if (normalized.includes("ADMIN") || normalized.includes("MANAGER")) {
     return 4;
@@ -177,6 +185,12 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
     };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
+      sessionStorage.removeItem("aegis_session");
+      sessionStorage.removeItem("aegis_user");
+      return null;
+    }
+
+    if (cachedUser.role === "SUPER_ADMIN") {
       sessionStorage.removeItem("aegis_session");
       sessionStorage.removeItem("aegis_user");
       return null;

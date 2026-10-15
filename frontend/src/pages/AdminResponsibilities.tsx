@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Award, BriefcaseBusiness } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -14,44 +14,52 @@ const RESPONSIBILITY_OPTIONS = [
   "FINAL_DECISION_MAKER",
 ];
 
+interface AdminUserRecord {
+  id: string;
+  name: string;
+  status: string;
+  responsibilities?: string[];
+}
+
 export default function AdminResponsibilities() {
   const { token } = useAuth();
   const { showToast } = useToast();
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [responsibility, setResponsibility] = useState("OPERATIONS_REVIEWER");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     if (!token) {
       return;
     }
 
     const response = await getUsers(token);
-    setUsers(response.data ?? []);
-    if (!selectedUserId && response.data?.length) {
-      setSelectedUserId(response.data[0].id);
-    }
-  };
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    void loadUsers().finally(() => setLoading(false));
+    const loadedUsers = (response.data ?? []) as AdminUserRecord[];
+    setUsers(loadedUsers);
+    setError(null);
+    setSelectedUserId((current) =>
+      current && loadedUsers.some((user) => user.id === current)
+        ? current
+        : loadedUsers.find((user) => user.status === "active")?.id ?? ""
+    );
   }, [token]);
 
+  useEffect(() => {
+    void loadUsers()
+      .catch((loadError) => setError(getErrorMessage(loadError, "Unable to load responsibilities.")))
+      .finally(() => setLoading(false));
+  }, [loadUsers]);
+
   const responsibilitySummary = useMemo(() => {
-    return users
-      .flatMap((user) =>
-        (user.responsibilities ?? []).map((item: string) => ({
-          user: user.name,
-          responsibility: item,
-        }))
-      )
-      .slice(0, 12);
+    return users.flatMap((user) =>
+      (user.responsibilities ?? []).map((item) => ({
+        user: user.name,
+        responsibility: item,
+      }))
+    );
   }, [users]);
 
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? users[0] ?? null;
@@ -84,6 +92,13 @@ export default function AdminResponsibilities() {
       {loading ? (
         <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-600">Loading responsibilities…</div>
       ) : (
+        <>
+        {error && (
+          <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <span>{error}</span>
+            <button type="button" onClick={() => { setLoading(true); void loadUsers().catch((loadError) => setError(getErrorMessage(loadError, "Unable to load responsibilities."))).finally(() => setLoading(false)); }} disabled={loading} className="font-medium underline disabled:opacity-50">Retry</button>
+          </div>
+        )}
         <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
           <form onSubmit={handleAssign} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-5 flex items-center gap-3">
@@ -99,12 +114,16 @@ export default function AdminResponsibilities() {
                 <select
                   value={selectedUserId}
                   onChange={(event) => setSelectedUserId(event.target.value)}
+                  disabled={users.filter((user) => user.status === "active").length === 0}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-700"
                 >
-                  {users.map((user) => (
+                  {users.filter((user) => user.status === "active").map((user) => (
                     <option key={user.id} value={user.id}>{user.name}</option>
                   ))}
                 </select>
+                {users.filter((user) => user.status === "active").length === 0 && (
+                  <p className="mt-1 text-xs text-slate-500">No active users are available for responsibility assignment.</p>
+                )}
               </div>
 
               <div>
@@ -163,6 +182,7 @@ export default function AdminResponsibilities() {
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   );
