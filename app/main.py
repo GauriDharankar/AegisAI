@@ -1,3 +1,6 @@
+import os
+from urllib.parse import urlsplit
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +14,30 @@ from app.api.platform_admin import router as platform_admin_router
 from app.api.reviewer import router as reviewer_router
 from app.db.database import init_db
 from app.db.seed import seed_demo_data
+
+
+def configured_cors_origins() -> list[str]:
+    origins = {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
+    configured = os.getenv("AEGISAI_CORS_ORIGINS", "")
+    for value in configured.split(","):
+        origin = value.strip()
+        if not origin:
+            continue
+        parsed = urlsplit(origin)
+        if (
+            "*" in origin
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("AEGISAI_CORS_ORIGINS must contain exact HTTP(S) origins, not paths or wildcards.")
+        origins.add(origin.rstrip("/"))
+    return sorted(origins)
 
 
 app = FastAPI(
@@ -31,10 +58,7 @@ def startup_event() -> None:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=configured_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

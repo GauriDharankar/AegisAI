@@ -76,6 +76,11 @@ def seed_demo_data() -> None:
     """
     if os.getenv("AEGISAI_TEST_MODE") == "1":
         return
+    if any(
+        os.getenv(name, "").strip().lower() in {"production", "prod"}
+        for name in ("AEGISAI_ENV", "APP_ENV", "ENVIRONMENT", "NODE_ENV")
+    ):
+        return
 
     session = SessionLocal()
     try:

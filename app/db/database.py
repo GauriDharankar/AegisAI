@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import URL, create_engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -40,26 +40,49 @@ TENANT_MIGRATION_COLUMNS = [
 ]
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-raw_db_path = os.getenv("AEGISAI_DB_PATH", str(BASE_DIR / "aegisai.db"))
-if raw_db_path and raw_db_path.strip().lower() == ":memory:":
-    DATABASE_URL = "sqlite://"
-    ENGINE_POOL_KWARGS = {"poolclass": StaticPool}
-else:
-    DB_PATH = Path(raw_db_path).resolve()
-    DATABASE_URL = f"sqlite:///{DB_PATH}"
-    ENGINE_POOL_KWARGS = {}
+
+
+def _configured_database_url() -> URL:
+    configured_url = os.getenv("DATABASE_URL", "").strip()
+    if configured_url:
+        url = make_url(configured_url)
+        if url.drivername in {"postgres", "postgresql"}:
+            url = url.set(drivername="postgresql+psycopg")
+        return url
+
+    raw_db_path = os.getenv("AEGISAI_DB_PATH", str(BASE_DIR / "aegisai.db")).strip()
+    if raw_db_path.lower() == ":memory:":
+        return URL.create("sqlite", database="")
+    return URL.create("sqlite", database=str(Path(raw_db_path).resolve()))
+
+
+def create_database_engine(database_url: str | None = None):
+    configured_url = make_url(database_url) if database_url else _configured_database_url()
+    if configured_url.drivername in {"postgres", "postgresql"}:
+        configured_url = configured_url.set(drivername="postgresql+psycopg")
+
+    engine_options = {"future": True}
+    if configured_url.get_backend_name() == "sqlite":
+        engine_options["connect_args"] = {"check_same_thread": False}
+        if configured_url.database in {"", ":memory:"}:
+            engine_options["poolclass"] = StaticPool
+    return create_engine(configured_url, **engine_options)
+
+
+DATABASE_URL = _configured_database_url()
+DB_PATH = (
+    Path(DATABASE_URL.database).resolve()
+    if DATABASE_URL.get_backend_name() == "sqlite"
+    and DATABASE_URL.database not in {"", ":memory:"}
+    else None
+)
 
 
 class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    **ENGINE_POOL_KWARGS,
-    future=True,
-)
+engine = create_database_engine(str(DATABASE_URL))
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -77,8 +100,14 @@ def get_db() -> Iterator[Session]:
         session.close()
 
 
+def _require_sqlite(target_engine) -> None:
+    if target_engine.dialect.name != "sqlite":
+        raise ValueError("SQLite migration functions only support SQLite databases.")
+
+
 def migrate_sqlite_application_schema(target_engine=None) -> None:
     bind = target_engine or engine
+    _require_sqlite(bind)
     with bind.begin() as connection:
         tables = connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if not any(row[0] == "applications" for row in tables):
@@ -157,6 +186,7 @@ def migrate_sqlite_application_schema(target_engine=None) -> None:
 
 def migrate_sqlite_tenant_schema(target_engine=None) -> None:
     bind = target_engine or engine
+    _require_sqlite(bind)
     with bind.begin() as connection:
         tables = {
             row[0]
@@ -183,6 +213,7 @@ def migrate_sqlite_tenant_schema(target_engine=None) -> None:
 
 def migrate_sqlite_user_schema(target_engine=None) -> None:
     bind = target_engine or engine
+    _require_sqlite(bind)
     with bind.begin() as connection:
         tables = {
             row[0]
@@ -229,6 +260,7 @@ def migrate_sqlite_user_schema(target_engine=None) -> None:
 
 def migrate_sqlite_review_schema(target_engine=None) -> None:
     bind = target_engine or engine
+    _require_sqlite(bind)
     with bind.begin() as connection:
         tables = {
             row[0]
@@ -280,7 +312,7 @@ def migrate_sqlite_review_schema(target_engine=None) -> None:
         connection.exec_driver_sql("CREATE INDEX ix_reviews_stage_id ON reviews (workflow_stage_id)")
 
 
-def init_db() -> None:
+def _load_models() -> None:
     from app.db.models import (  # noqa: F401
         Application,
         AuditLog,
@@ -302,16 +334,25 @@ def init_db() -> None:
         WorkflowStage,
     )
 
-    existing_tables = {
-        row[0]
-        for row in engine.connect().exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    }
-    required_tables = {table.name for table in Base.metadata.sorted_tables}
-    missing_tables = required_tables - existing_tables
 
-    if missing_tables:
-        Base.metadata.create_all(bind=engine)
+def initialize_postgresql_schema(target_engine=None) -> None:
+    """Create missing PostgreSQL tables; existing-schema changes require a reviewed migration."""
+    bind = target_engine or engine
+    if bind.dialect.name != "postgresql":
+        raise ValueError("PostgreSQL schema initialization requires a PostgreSQL engine.")
+    _load_models()
+    Base.metadata.create_all(bind=bind)
 
+
+def init_db() -> None:
+    _load_models()
+    if engine.dialect.name == "postgresql":
+        initialize_postgresql_schema(engine)
+        return
+    if engine.dialect.name != "sqlite":
+        raise ValueError(f"Unsupported database dialect: {engine.dialect.name}")
+
+    Base.metadata.create_all(bind=engine)
     migrate_sqlite_application_schema(engine)
     migrate_sqlite_tenant_schema(engine)
     migrate_sqlite_user_schema(engine)

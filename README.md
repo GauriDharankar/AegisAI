@@ -108,10 +108,10 @@ are written in one transaction. To securely enroll or replace the verified
 number on an existing account that lacks one, run
 `python -m app.provision_platform_admin --enroll-phone` with the separate
 `AEGISAI_ALLOW_PLATFORM_ADMIN_PHONE_ENROLLMENT=I_ACKNOWLEDGE_PRIVILEGED_ACCOUNT_PHONE_UPDATE`
-opt-in, the absolute database path, and exact path confirmation. This
-administrative procedure can run against the configured production database
-and requires successful SMS verification of the new number; it revokes that
-account's sessions.
+opt-in, the absolute database path, and exact path confirmation. On SQLite deployments, this procedure can target the configured production
+SQLite database and requires successful SMS verification of the new number; it
+revokes that account's sessions. The current provisioning CLI is SQLite-only
+and cannot target a PostgreSQL `DATABASE_URL`.
 
 ```powershell
 $env:AEGISAI_ENV = "production"
@@ -150,6 +150,21 @@ provisioning opt-in variables after each administrative command:
 ```powershell
 Remove-Item Env:AEGISAI_ALLOW_LOCAL_PLATFORM_ADMIN_PROVISIONING
 ```
+
+## Database and frontend deployment configuration
+
+Local development uses `AEGISAI_DB_PATH` or the repository's `aegisai.db` by
+default; `AEGISAI_DB_PATH=:memory:` keeps the shared in-memory SQLite database
+used by tests. Set `DATABASE_URL` to a PostgreSQL connection URL for deployment.
+The backend uses the `psycopg` 3 driver. Startup creates missing PostgreSQL
+tables from SQLAlchemy metadata, but does not migrate or alter existing
+PostgreSQL tables. Review and apply any required schema changes through a
+separately managed migration before deploying application changes.
+
+Set `AEGISAI_CORS_ORIGINS` to a comma-separated list of exact frontend origins,
+including scheme and optional port (for example, `https://app.example.com`).
+Local Vite origins remain allowed. Wildcards, URL paths, and non-HTTP(S)
+origins are rejected; do not use `*` with credentialed requests.
 
 Platform Super Admins sign in at `/platform-admin/login`; tenant sign-in and
 organization registration remain at `/login` and `/register`. Password
