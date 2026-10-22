@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { reviewService, type ReviewerApplication } from "../services/reviewService";
 import { getErrorMessage } from "../services/errorMessage";
 import { useToast } from "../components/ToastProvider";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 export default function ApplicationReview() {
   const { id } = useParams();
@@ -180,7 +181,7 @@ export default function ApplicationReview() {
 
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs text-slate-500">Created</p>
-            <p className="mt-1 font-semibold">{new Date(application.created_at).toLocaleString()}</p>
+            <p className="mt-1 font-semibold">{formatIstTimestamp(application.created_at)}</p>
           </div>
         </div>
       </div>

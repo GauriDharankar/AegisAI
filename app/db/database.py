@@ -199,6 +199,32 @@ def migrate_sqlite_user_schema(target_engine=None) -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE users ADD COLUMN is_platform_admin BOOLEAN NOT NULL DEFAULT 0"
             )
+        additions = (
+            ("phone_number_encrypted", "TEXT"),
+            ("phone_number_hash", "VARCHAR(64)"),
+            ("phone_verified_at", "DATETIME"),
+            ("session_version", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_type in additions:
+            if column_name not in existing_columns:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"
+                )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_users_phone_number_hash ON users (phone_number_hash)"
+        )
+        if "platform_admin_password_reset_challenges" in tables:
+            reset_columns = {
+                row[1]
+                for row in connection.exec_driver_sql(
+                    "PRAGMA table_info(platform_admin_password_reset_challenges)"
+                ).fetchall()
+            }
+            if "phone_number_hash" not in reset_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE platform_admin_password_reset_challenges "
+                    "ADD COLUMN phone_number_hash VARCHAR(64)"
+                )
 
 
 def migrate_sqlite_review_schema(target_engine=None) -> None:
@@ -264,6 +290,7 @@ def init_db() -> None:
         Permission,
         PlatformAdmin,
         PlatformAuditLog,
+        PasswordResetChallenge,
         Policy,
         PolicyVersion,
         Review,

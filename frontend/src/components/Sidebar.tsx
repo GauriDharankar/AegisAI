@@ -63,6 +63,12 @@ const menuItems: MenuItem[] = [
     roles: ["RISK_OFFICER", "MANAGER"],
   },
   {
+    name: "Hunter Alerts",
+    path: "/hunter-alerts",
+    icon: ShieldAlert,
+    roles: allRoles,
+  },
+  {
     name: "Policies",
     path: "/policies",
     icon: FileSearch,

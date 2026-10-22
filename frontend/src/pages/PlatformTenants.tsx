@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getPlatformTenants } from "../services/platformAdminService";
 import type { PlatformTenant } from "../services/platformAdminService";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 function statusBadge(status: string, kind: "account" | "verification") {
   const normalized = status.toUpperCase();
@@ -32,18 +33,6 @@ function statusBadge(status: string, kind: "account" | "verification") {
       {label}
     </span>
   );
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
 }
 
 function errorMessage(error: unknown): string {
@@ -260,7 +249,7 @@ export default function PlatformTenants() {
                     <td className="px-6 py-4">
                       <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-slate-600">
                         <CalendarDays size={14} aria-hidden="true" className="text-slate-400" />
-                        {formatDate(tenant.created_at)}
+                        {formatIstTimestamp(tenant.created_at)}
                       </span>
                     </td>
                   </tr>

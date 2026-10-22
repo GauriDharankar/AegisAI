@@ -6,12 +6,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Application, AuditLog, HunterAlert
+from app.services.datetime_service import serialize_utc_datetime
 
 
 class HunterService:
     """Persistent duplicate-application detection without cross-tenant disclosure."""
 
-    def check_application(self, db: Session, application: Application, actor_user_id: str | None = None) -> dict[str, Any]:
+    def check_application(
+        self,
+        db: Session,
+        application: Application,
+        actor_user_id: str | None = None,
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
         applicant_filters = [Application.applicant_email == application.applicant_email]
         if not application.applicant_email:
             applicant_filters = [Application.applicant_name == application.applicant_name]
@@ -21,7 +29,7 @@ class HunterService:
             .where(
                 Application.tenant_id != application.tenant_id,
                 Application.loan_type == application.loan_type,
-                Application.status == "active",
+                Application.status.in_(("new", "in_review")),
                 *applicant_filters,
             )
             .order_by(Application.created_at.asc())
@@ -29,18 +37,27 @@ class HunterService:
 
         duplicate_detected = duplicate is not None
         if duplicate_detected:
-            self._create_alert(
-                db,
-                recipient_tenant_id=application.tenant_id,
-                application=application,
-                message="Potential duplicate loan application detected.",
+            recipients = {
+                application.tenant_id: "Potential duplicate loan application detected.",
+                duplicate.tenant_id: "A potential duplicate loan application has been detected for this applicant.",
+            }
+            existing_recipients = set(
+                db.execute(
+                    select(HunterAlert.recipient_tenant_id).where(
+                        HunterAlert.application_id == application.id,
+                        HunterAlert.alert_type == "DUPLICATE_LOAN_APPLICATION",
+                        HunterAlert.recipient_tenant_id.in_(recipients),
+                    )
+                ).scalars()
             )
-            self._create_alert(
-                db,
-                recipient_tenant_id=duplicate.tenant_id,
-                application=application,
-                message="A potential duplicate loan application has been detected for this applicant.",
-            )
+            for recipient_tenant_id, message in recipients.items():
+                if recipient_tenant_id not in existing_recipients:
+                    self._create_alert(
+                        db,
+                        recipient_tenant_id=recipient_tenant_id,
+                        application=application,
+                        message=message,
+                    )
 
         db.add(
             AuditLog(
@@ -57,7 +74,10 @@ class HunterService:
                 },
             )
         )
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
 
         if duplicate_detected:
             return {
@@ -98,7 +118,7 @@ class HunterService:
             select(HunterAlert.alert_id)
             .where(HunterAlert.application_id == application_id, HunterAlert.recipient_tenant_id == tenant_id)
             .order_by(HunterAlert.created_at.desc())
-        ).scalar_one_or_none()
+        ).scalars().first()
         return alert
 
     @staticmethod
@@ -112,7 +132,7 @@ class HunterService:
             "status": alert.status,
             "loan_type": alert.loan_type,
             "message": alert.message,
-            "created_at": alert.created_at.isoformat(),
+            "created_at": serialize_utc_datetime(alert.created_at),
         }
 
 

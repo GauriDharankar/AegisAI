@@ -11,6 +11,7 @@ from app.api.applications import _advance_application_to_next_stage, _record_aud
 from app.db.database import get_db
 from app.db.models import Application, AuditLog, Decision, Review, Role, Team, Tenant, User
 from app.services.auth_service import get_current_user
+from app.services.datetime_service import serialize_utc_datetime
 from app.services.blockchain_service import submit_blockchain_audit
 
 router = APIRouter(prefix="/api/v1", tags=["Reviewer"])
@@ -101,7 +102,7 @@ def _serialize_review_record(review: Review, application: Application) -> dict[s
         "reviewer_id": review.reviewer_id,
         "status": review.status,
         "comments": review.comments,
-        "created_at": review.created_at.isoformat(),
+        "created_at": serialize_utc_datetime(review.created_at),
     }
 
 
@@ -300,7 +301,7 @@ def submit_reviewer_review(
             "workflow_stage": None,
             "status": review.status,
             "comments": review.comments,
-            "created_at": review.created_at.isoformat(),
+            "created_at": serialize_utc_datetime(review.created_at),
             "next_stage": None,
             "next_team_id": None,
             "finalized": True,
@@ -443,7 +444,7 @@ def submit_reviewer_review(
                 "workflow_stage": current_stage,
                 "status": review.status,
                 "comments": review.comments,
-                "created_at": review.created_at.isoformat(),
+                "created_at": serialize_utc_datetime(review.created_at),
                 "next_stage": None,
                 "next_team_id": None,
                 "finalized": True,
@@ -459,7 +460,7 @@ def submit_reviewer_review(
         "workflow_stage": current_stage,
         "status": review.status,
         "comments": review.comments,
-        "created_at": review.created_at.isoformat(),
+        "created_at": serialize_utc_datetime(review.created_at),
         "next_stage": next_application.current_workflow_stage,
         "next_team_id": next_application.assigned_team_id,
     }
@@ -572,7 +573,7 @@ def submit_final_decision(
         "decision_maker_id": current_user.id,
         "workflow_stage": application.current_workflow_stage,
         "status": application.status,
-        "created_at": decision.created_at.isoformat(),
+        "created_at": serialize_utc_datetime(decision.created_at),
         "blockchain": blockchain_result,
     }
 

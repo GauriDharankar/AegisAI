@@ -9,6 +9,7 @@ from app.db.database import SessionLocal
 from app.db.models import AuditLog, Policy, PolicyVersion
 from app.api.applications import _tenant_policy_rules
 from app.main import app
+from test.tenant_approval_helpers import approve_tenant
 
 client = TestClient(app)
 
@@ -26,6 +27,7 @@ def _register_tenant(prefix: str) -> dict:
         },
     )
     assert response.status_code == 200, response.text
+    approve_tenant(client, response.json()["tenant"]["id"])
     return response.json()
 
 

@@ -15,20 +15,9 @@ import { useAuth } from "../context/AuthContext";
 import { getErrorMessage } from "../services/errorMessage";
 import { getPlatformActivity } from "../services/platformAdminService";
 import type { PlatformActivityItem } from "../services/platformAdminService";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 const PAGE_SIZE = 25;
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 function formatLabel(value: string): string {
   return value
@@ -200,7 +189,7 @@ export default function PlatformAdminActivity() {
                 {events.map((event) => (
                   <tr key={event.id} className="align-top transition-colors hover:bg-slate-50/70">
                     <td className="whitespace-nowrap px-5 py-4 text-xs text-slate-600">
-                      <time dateTime={event.timestamp}>{formatTimestamp(event.timestamp)}</time>
+                      <time dateTime={event.timestamp}>{formatIstTimestamp(event.timestamp)}</time>
                     </td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${actionTone(event.action)}`}>

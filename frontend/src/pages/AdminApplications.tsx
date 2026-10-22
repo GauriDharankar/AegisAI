@@ -7,6 +7,7 @@ import { getRiskRouting, getTeams } from "../services/adminService";
 import api from "../services/api";
 import { getErrorMessage } from "../services/errorMessage";
 import { useToast } from "../components/ToastProvider";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 interface ApplicationRecord {
   id: string;
@@ -429,7 +430,7 @@ export default function AdminApplications() {
                   <div><span className="font-medium text-slate-700">AI governance:</span> {application.governance_status || "Not evaluated"}</div>
                   <div><span className="font-medium text-slate-700">Risk:</span> {application.governance_result?.risk?.level || "Not evaluated"}</div>
                   <div>
-                    <span className="font-medium text-slate-700">Created:</span> {new Date(application.created_at).toLocaleString()}
+                    <span className="font-medium text-slate-700">Created:</span> {formatIstTimestamp(application.created_at)}
                   </div>
                 </div>
                 <button

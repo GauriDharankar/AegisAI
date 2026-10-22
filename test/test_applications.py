@@ -11,6 +11,7 @@ from app.main import app
 from app.services.financial_service import calculate_debt_to_income
 from app.services.governance_service import governance_service
 from app.services.policy_service import PolicyService
+from test.tenant_approval_helpers import approve_tenant
 
 client = TestClient(app)
 
@@ -86,6 +87,7 @@ def _register_tenant(prefix: str = "App") -> tuple[str, str]:
         },
     )
     assert response.status_code == 200, response.text
+    approve_tenant(client, response.json()["tenant"]["id"])
     return response.json()["token"], response.json()["tenant"]["id"]
 
 

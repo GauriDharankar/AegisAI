@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { getOrganization, updateOrganization } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
 import { useToast } from "../components/ToastProvider";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 export default function AdminOrganization() {
   const { token } = useAuth();
@@ -112,7 +113,7 @@ export default function AdminOrganization() {
             </div>
             <div className="rounded-lg bg-slate-50 p-4 md:col-span-2">
               <p className="text-sm text-slate-500">Created date</p>
-              <p className="mt-2 font-semibold text-slate-900">{new Date(organization.created_at).toLocaleString()}</p>
+              <p className="mt-2 font-semibold text-slate-900">{formatIstTimestamp(organization.created_at)}</p>
             </div>
           </div>
         </div>

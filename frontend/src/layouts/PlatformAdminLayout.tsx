@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Settings,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const navigation = [
   { label: "Tenant Management", path: "/platform-admin/tenants", icon: Building2 },
   { label: "Verification Requests", path: "/platform-admin/verifications", icon: ShieldCheck },
   { label: "Admin Activity", path: "/platform-admin/activity", icon: Activity },
+  { label: "Settings", path: "/platform-admin/settings", icon: Settings },
 ];
 
 export default function PlatformAdminLayout() {
@@ -26,7 +28,7 @@ export default function PlatformAdminLayout() {
 
   const handleLogout = () => {
     logout();
-    navigate("/login", { replace: true });
+    navigate("/platform-admin/login", { replace: true });
   };
 
   const sidebar = (

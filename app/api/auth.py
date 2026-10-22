@@ -12,12 +12,12 @@ from app.db.models import AuditLog, PlatformAdmin, Role, TeamMember, Tenant, Use
 from app.services.auth_service import (
     create_session_token,
     create_tenant_admin_user,
-    get_current_tenant,
-    get_current_user,
+    get_authenticated_user,
     invalidate_session_token,
     normalize_email,
     verify_password,
 )
+from app.services.datetime_service import serialize_utc_datetime
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
@@ -61,6 +61,15 @@ def _serialize_user_assignments(db: Session, user: User) -> dict:
                 ],
             }
         ),
+    }
+
+
+def _serialize_tenant_status(tenant: Tenant) -> dict:
+    return {
+        "tenant_status": tenant.status,
+        "verification_status": tenant.verification_status,
+        "verification_reason": tenant.verification_reason,
+        "tenant_created_at": serialize_utc_datetime(tenant.created_at),
     }
 
 
@@ -113,12 +122,17 @@ def register_organization(
             "email": user.email,
             "role": current_role_name,
             "tenant_id": user.tenant_id,
+            "tenant_name": tenant.organization_name,
             "level": 4,
+            **_serialize_tenant_status(tenant),
         },
         "tenant": {
             "id": tenant.id,
             "organization_name": tenant.organization_name,
             "status": tenant.status,
+            "verification_status": tenant.verification_status,
+            "verification_reason": tenant.verification_reason,
+            "created_at": serialize_utc_datetime(tenant.created_at),
         },
     }
 
@@ -139,23 +153,18 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             detail="Your account is inactive. Contact your organization administrator.",
         )
 
-    platform_admin_record = db.execute(
-        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
-    ).scalar_one_or_none()
-    if not (user.is_platform_admin and platform_admin_record is not None):
-        tenant = db.get(Tenant, user.tenant_id)
-        if tenant is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
-        if tenant.status != "active":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your organization account is inactive. Contact platform support.",
-            )
-
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    if user.is_platform_admin or db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
+    ).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
-    role = db.get(Role, user.primary_role_id)
+    tenant = db.get(Tenant, user.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+
+    role = db.get(Role, user.primary_role_id) if user.primary_role_id else None
     token_role = "Super Admin" if user.is_platform_admin else (role.name if role else "Tenant Admin")
     token = create_session_token(user, role_name=token_role)
     assignments = _serialize_user_assignments(db, user)
@@ -170,11 +179,16 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             "role": token_role,
             "tenant_id": user.tenant_id,
             "level": 5 if user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
+            **_serialize_tenant_status(tenant),
             **assignments,
         },
         "tenant": {
-            "id": user.tenant_id,
-            "organization_name": db.get(Tenant, user.tenant_id).organization_name if db.get(Tenant, user.tenant_id) else "",
+            "id": tenant.id,
+            "organization_name": tenant.organization_name,
+            "status": tenant.status,
+            "verification_status": tenant.verification_status,
+            "verification_reason": tenant.verification_reason,
+            "created_at": serialize_utc_datetime(tenant.created_at),
         },
     }
 
@@ -186,6 +200,7 @@ def logout(
 ):
     token = None
     if authorization and authorization.lower().startswith("bearer "):
+
         token = authorization.split(" ", 1)[1].strip()
 
     invalidate_session_token(token)
@@ -194,10 +209,10 @@ def logout(
 
 @router.post("/refresh")
 def refresh_session(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    role = db.get(Role, current_user.primary_role_id)
+    role = db.get(Role, current_user.primary_role_id) if current_user.primary_role_id else None
     token_role = "Super Admin" if current_user.is_platform_admin else (role.name if role else "Tenant Admin")
     token = create_session_token(current_user, role_name=token_role)
     tenant = db.get(Tenant, current_user.tenant_id)
@@ -213,6 +228,7 @@ def refresh_session(
             "tenant_id": current_user.tenant_id,
             "tenant_name": tenant.organization_name if tenant else None,
             "level": 5 if current_user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
+            **(_serialize_tenant_status(tenant) if tenant else {}),
             **assignments,
         },
     }
@@ -220,11 +236,11 @@ def refresh_session(
 
 @router.get("/me")
 def get_current_identity(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
     tenant = db.get(Tenant, current_user.tenant_id)
-    role = db.get(Role, current_user.primary_role_id)
+    role = db.get(Role, current_user.primary_role_id) if current_user.primary_role_id else None
     assignments = _serialize_user_assignments(db, current_user)
     token_role = "Super Admin" if current_user.is_platform_admin else (role.name if role else "Tenant Admin")
 
@@ -236,6 +252,7 @@ def get_current_identity(
         "tenant_id": current_user.tenant_id,
         "tenant_name": tenant.organization_name if tenant else None,
         "level": 5 if current_user.is_platform_admin else (4 if (role and role.name == "Tenant Admin") else 2),
+        **(_serialize_tenant_status(tenant) if tenant else {}),
         **assignments,
     }
 

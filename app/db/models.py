@@ -94,6 +94,26 @@ class PlatformAdmin(Base):
     user: Mapped["User"] = relationship(back_populates="platform_admin")
 
 
+class PasswordResetChallenge(Base):
+    __tablename__ = "platform_admin_password_reset_challenges"
+    __table_args__ = (
+        Index("ix_platform_admin_reset_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: generate_id("PRC"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    phone_number_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    delivery_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    otp_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reset_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reset_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
@@ -108,6 +128,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    phone_number_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phone_number_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    phone_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

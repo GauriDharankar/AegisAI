@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAuditLogs } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 interface AuditLogRecord {
   id: string;
@@ -146,7 +147,7 @@ export default function AdminAudit() {
               <tbody className="divide-y divide-slate-200">
                 {logs.map((log) => (
                   <tr key={log.id}>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{new Date(log.timestamp).toLocaleString()}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatIstTimestamp(log.timestamp)}</td>
                     <td className="px-4 py-3 text-slate-700">
                       <div>{log.actor_name ?? "System"}</div>
                       {log.actor_email && <div className="text-xs text-slate-500">{log.actor_email}</div>}

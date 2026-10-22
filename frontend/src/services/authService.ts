@@ -22,6 +22,10 @@ export interface AuthApiUser {
   role: string;
   tenant_id?: string;
   tenant_name?: string;
+  tenant_status?: string;
+  verification_status?: string;
+  verification_reason?: string | null;
+  tenant_created_at?: string | null;
   level?: number;
   responsibilities?: string[];
   teams?: Array<{ id: string; name: string; role?: string | null }>;
@@ -33,6 +37,10 @@ export interface AuthSession {
   tenant?: {
     id: string;
     organization_name: string;
+    status?: string;
+    verification_status?: string;
+    verification_reason?: string | null;
+    created_at?: string | null;
   };
 }
 
@@ -88,9 +96,25 @@ const mapApiUser = (apiUser: AuthApiUser): User => ({
   level: (apiUser.level as 1 | 2 | 3 | 4) || mapLevel(apiUser.role),
   tenant_id: apiUser.tenant_id,
   tenant_name: apiUser.tenant_name,
+  tenant_status: apiUser.tenant_status,
+  verification_status: apiUser.verification_status,
+  verification_reason: apiUser.verification_reason,
+  tenant_created_at: apiUser.tenant_created_at,
   responsibilities: apiUser.responsibilities,
   teams: apiUser.teams,
 });
+
+export const hasApprovedActiveOrganization = (user: User): boolean =>
+  user.role === "SUPER_ADMIN"
+  || (
+    user.tenant_status?.toLowerCase() === "active"
+    && user.verification_status?.toUpperCase() === "VERIFIED"
+  );
+
+export const getAuthenticatedDestination = (user: User): string => {
+  if (user.role === "SUPER_ADMIN") return "/platform-admin";
+  return hasApprovedActiveOrganization(user) ? "/dashboard" : "/application-status";
+};
 
 export const login = async (payload: AuthLoginPayload) => {
   const response = await api.post("/api/v1/auth/login", payload);
@@ -100,6 +124,54 @@ export const login = async (payload: AuthLoginPayload) => {
     ...response.data,
     user: mapApiUser(apiUser),
   } as AuthSession;
+};
+
+export const loginPlatformAdmin = async (payload: AuthLoginPayload): Promise<AuthSession> => {
+  const response = await api.post("/api/v1/platform-admin/login", payload);
+  return {
+    ...response.data,
+    user: mapApiUser(response.data.user as AuthApiUser),
+  } as AuthSession;
+};
+
+export const startPlatformAdminPasswordReset = async (phone_number: string) => {
+  const response = await api.post("/api/v1/platform-admin/password-reset/start", { phone_number });
+  return response.data as { message: string; development_otp?: string };
+};
+
+export const verifyPlatformAdminPasswordResetCode = async (phone_number: string, code: string) => {
+  const response = await api.post("/api/v1/platform-admin/password-reset/verify", {
+    phone_number,
+    code,
+  });
+  return response.data as { reset_token: string };
+};
+
+export const confirmPlatformAdminPasswordReset = async (
+  reset_token: string,
+  new_password: string,
+  confirm_password: string
+) => {
+  const response = await api.post("/api/v1/platform-admin/password-reset/confirm", {
+    reset_token,
+    new_password,
+    confirm_password,
+  });
+  return response.data as { message: string };
+};
+
+export const changePlatformAdminPassword = async (
+  token: string,
+  current_password: string,
+  new_password: string,
+  confirm_password: string
+) => {
+  const response = await api.post(
+    "/api/v1/platform-admin/password/change",
+    { current_password, new_password, confirm_password },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return response.data as { message: string };
 };
 
 export const register = async (payload: AuthRegisterPayload) => {
@@ -122,6 +194,13 @@ export const refreshSession = async (token: string): Promise<AuthSession> => {
     ...response.data,
     user: mapApiUser(response.data.user as AuthApiUser),
   } as AuthSession;
+};
+
+export const getCurrentUser = async (token: string): Promise<User> => {
+  const response = await api.get("/api/v1/auth/me", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return mapApiUser(response.data as AuthApiUser);
 };
 
 export const getTokenExpiry = (token: string): number | null => {
@@ -168,14 +247,7 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
   }
 
   try {
-    const response = await api.get("/api/v1/auth/me", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    const apiUser = response.data as AuthApiUser;
-    const user = mapApiUser(apiUser);
+    const user = await getCurrentUser(token);
 
     sessionStorage.setItem("aegis_user", JSON.stringify(user));
 
@@ -196,9 +268,17 @@ export const restoreSession = async (): Promise<AuthSession | null> => {
       return null;
     }
 
+    const statusUnavailableUser: User = {
+      ...cachedUser,
+      tenant_status: undefined,
+      verification_status: "UNKNOWN",
+      verification_reason: null,
+      tenant_created_at: null,
+    };
+
     return {
       token,
-      user: cachedUser,
+      user: statusUnavailableUser,
     };
   }
 };
@@ -209,5 +289,6 @@ export default {
   refreshSession,
   getTokenExpiry,
   logout,
+  getCurrentUser,
   restoreSession,
 };

@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 from typing import Any
+from datetime import datetime
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -17,7 +18,29 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import PlatformAdmin, Permission, Role, Tenant, Team, User, WorkflowStage, GovernanceWorkflow
 
-AUTH_SECRET = os.getenv("AEGISAI_AUTH_SECRET", "aegisai-local-dev-secret-change-me")
+_DEFAULT_AUTH_SECRET = "aegisai-local-dev-secret-change-me"
+_configured_auth_secret = os.getenv("AEGISAI_AUTH_SECRET", "").strip()
+_production_environment = any(
+    os.getenv(name, "").strip().lower() in {"production", "prod"}
+    for name in ("AEGISAI_ENV", "APP_ENV", "ENVIRONMENT", "NODE_ENV")
+)
+_development_environment = any(
+    os.getenv(name, "").strip().lower() in {"development", "dev", "local"}
+    for name in ("AEGISAI_ENV", "APP_ENV", "ENVIRONMENT", "NODE_ENV")
+)
+if _production_environment and (
+    len(_configured_auth_secret.encode("utf-8")) < 32
+    or _configured_auth_secret == _DEFAULT_AUTH_SECRET
+):
+    raise RuntimeError("Set AEGISAI_AUTH_SECRET to a random value of at least 32 bytes in production.")
+if _configured_auth_secret:
+    AUTH_SECRET = _configured_auth_secret
+elif _development_environment and not _production_environment:
+    AUTH_SECRET = _DEFAULT_AUTH_SECRET
+else:
+    raise RuntimeError(
+        "Set AEGISAI_AUTH_SECRET or explicitly select a development environment."
+    )
 SESSION_TTL_SECONDS = 60 * 60 * 8
 
 
@@ -81,6 +104,7 @@ def create_session_token(user: User, role_name: str | None = None) -> str:
         "tenant_id": user.tenant_id,
         "email": user.email,
         "role": role_name or "Tenant Admin",
+        "ver": user.session_version,
         "exp": int(time.time()) + SESSION_TTL_SECONDS,
     }
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -124,7 +148,7 @@ def invalidate_session_token(token: str | None) -> None:
     return None
 
 
-def get_current_user(
+def get_authenticated_user(
     authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ) -> User:
@@ -140,26 +164,46 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+    if payload.get("ver", 0) != user.session_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked.")
     if user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Your account is inactive. Contact your organization administrator.",
         )
 
-    platform_admin_record = db.execute(
-        select(PlatformAdmin).where(PlatformAdmin.user_id == user.id)
-    ).scalar_one_or_none()
-    if not (user.is_platform_admin and platform_admin_record is not None):
-        tenant = db.get(Tenant, user.tenant_id)
-        if tenant is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
-        if tenant.status != "active":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your organization account is inactive. Contact platform support.",
-            )
+    if db.get(Tenant, user.tenant_id) is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
 
     return user
+
+
+def get_current_user(
+    current_user: User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> User:
+    platform_admin_record = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.user_id == current_user.id)
+    ).scalar_one_or_none()
+    if not (current_user.is_platform_admin and platform_admin_record is not None):
+        tenant = db.get(Tenant, current_user.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+        if tenant.status.lower() != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization access is blocked: the organization account is inactive. Contact platform support.",
+            )
+        if tenant.verification_status.upper() != "VERIFIED":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Organization access is blocked until verification is approved "
+                    f"(verification_status={tenant.verification_status.upper()})."
+                ),
+            )
+
+    return current_user
 
 
 def get_current_tenant(
@@ -261,8 +305,16 @@ def create_platform_admin_user(
     full_name: str,
     email: str,
     password: str,
+    phone_number: str,
+    phone_verified_at: datetime,
     tenant_id: str | None = None,
 ) -> User:
+    from app.services.phone_service import (
+        encrypt_phone_number,
+        hash_phone_number,
+        normalize_phone_number,
+    )
+
     normalized_email = normalize_email(email)
 
     if not full_name.strip():
@@ -271,6 +323,9 @@ def create_platform_admin_user(
         raise ValueError("A valid email is required.")
 
     validate_password(password)
+    normalized_phone = normalize_phone_number(phone_number)
+    if phone_verified_at is None:
+        raise ValueError("A verified contact number is required for Platform Super Admin provisioning.")
 
     existing_user = session.execute(
         select(User).where(User.email == normalized_email)
@@ -296,6 +351,9 @@ def create_platform_admin_user(
         password_hash=hash_password(password),
         status="active",
         is_platform_admin=True,
+        phone_number_encrypted=encrypt_phone_number(normalized_phone),
+        phone_number_hash=hash_phone_number(normalized_phone),
+        phone_verified_at=phone_verified_at,
         primary_role_id=None,
     )
     session.add(user)
@@ -330,7 +388,11 @@ def create_tenant_admin_user(session: Session, organization_name: str, full_name
     if existing_user is not None:
         raise ValueError("A user with that email already exists.")
 
-    tenant = Tenant(organization_name=organization_name.strip(), status="active")
+    tenant = Tenant(
+        organization_name=organization_name.strip(),
+        status="active",
+        verification_status="PENDING",
+    )
     session.add(tenant)
     session.flush()
 

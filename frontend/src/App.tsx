@@ -9,12 +9,16 @@ import {
 import DashboardLayout from "./layouts/DashboardLayout";
 
 import Login from "./pages/Login";
+import PlatformAdminLogin from "./pages/PlatformAdminLogin";
+import PlatformAdminForgotPassword from "./pages/PlatformAdminForgotPassword";
+import ApplicationStatus from "./pages/ApplicationStatus";
 import Unauthorized from "./pages/Unauthorized";
 
 import Dashboard from "./pages/Dashboard";
 import ReviewQueue from "./pages/ReviewQueue";
 import ApplicationReview from "./pages/ApplicationReview";
 import BiasAlerts from "./pages/BiasAlerts";
+import HunterAlerts from "./pages/HunterAlerts";
 import Reminders from "./pages/Reminders";
 import Notifications from "./pages/Notifications";
 import GovernanceAnalysis from "./pages/GovernanceAnalysis";
@@ -32,6 +36,7 @@ import AdminApplications from "./pages/AdminApplications";
 import AdminApplicationDetails from "./pages/AdminApplicationDetails";
 import AdminAudit from "./pages/AdminAudit";
 import AdminSettings from "./pages/AdminSettings";
+import PlatformAdminSettings from "./pages/PlatformAdminSettings";
 import PlatformAdminLayout from "./layouts/PlatformAdminLayout";
 import PlatformAdminPage from "./pages/PlatformAdminPage";
 import PlatformTenants from "./pages/PlatformTenants";
@@ -39,6 +44,7 @@ import PlatformTenantDetails from "./pages/PlatformTenantDetails";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
+import { getAuthenticatedDestination } from "./services/authService";
 
 function AuthenticatedHomeRedirect() {
   const { user, isInitializing } = useAuth();
@@ -47,12 +53,7 @@ function AuthenticatedHomeRedirect() {
     return null;
   }
 
-  return (
-    <Navigate
-      to={user?.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard"}
-      replace
-    />
-  );
+  return <Navigate to={user ? getAuthenticatedDestination(user) : "/login"} replace />;
 }
 
 function App() {
@@ -70,6 +71,16 @@ function App() {
 
         <Route path="/login" element={<Login initialMode="login" />} />
         <Route path="/register" element={<Login initialMode="register" />} />
+        <Route path="/platform-admin/login" element={<PlatformAdminLogin />} />
+        <Route path="/platform-admin/forgot-password" element={<PlatformAdminForgotPassword />} />
+        <Route
+          path="/application-status"
+          element={
+            <ProtectedRoute allowUnapprovedOrganization>
+              <ApplicationStatus />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="/unauthorized"
@@ -160,6 +171,23 @@ function App() {
                 ]}
               >
                 <BiasAlerts />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Hunter Alerts */}
+          <Route
+            path="hunter-alerts"
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "OPERATIONS",
+                  "RISK_OFFICER",
+                  "CREDIT_COMMITTEE",
+                  "MANAGER",
+                ]}
+              >
+                <HunterAlerts />
               </ProtectedRoute>
             }
           />
@@ -373,6 +401,10 @@ import AdminApplicationDetails from "./pages/AdminApplicationDetails";
           <Route
             path="platform-admin/activity"
             element={<PlatformAdminPage />}
+          />
+          <Route
+            path="platform-admin/settings"
+            element={<PlatformAdminSettings />}
           />
         </Route>
 

@@ -9,9 +9,12 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
-import { login as loginRequest, register as registerRequest } from "../services/authService";
+import {
+  getAuthenticatedDestination,
+  login as loginRequest,
+  register as registerRequest,
+} from "../services/authService";
 import { getErrorMessage } from "../services/errorMessage";
-import type { User } from "../types/auth";
 
 export default function Login({ initialMode = "login" }: { initialMode?: "login" | "register" }) {
   const navigate = useNavigate();
@@ -46,28 +49,13 @@ export default function Login({ initialMode = "login" }: { initialMode?: "login"
         password,
       });
 
-      const loggedInUser: User = {
-        id: session.user.id,
-        name: session.user.name,
-        email: session.user.email,
-        role: session.user.role,
-        level: session.user.level,
-        tenant_id: session.user.tenant_id,
-        tenant_name: session.user.tenant_name,
-        responsibilities: session.user.responsibilities,
-        teams: session.user.teams,
-      };
-
-      login(loggedInUser, session.token);
+      login(session.user, session.token);
 
       if (rememberMe) {
         sessionStorage.setItem("aegis_session", session.token);
       }
 
-      navigate(
-        session.user.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard",
-        { replace: true }
-      );
+      navigate(getAuthenticatedDestination(session.user), { replace: true });
     } catch (submitError) {
       setError(getErrorMessage(submitError, "Invalid email or password."));
     } finally {
@@ -99,23 +87,8 @@ export default function Login({ initialMode = "login" }: { initialMode?: "login"
         confirm_password: confirmPassword,
       });
 
-      const loggedInUser: User = {
-        id: session.user.id,
-        name: session.user.name,
-        email: session.user.email,
-        role: session.user.role,
-        level: session.user.level,
-        tenant_id: session.user.tenant_id,
-        tenant_name: session.user.tenant_name,
-        responsibilities: session.user.responsibilities,
-        teams: session.user.teams,
-      };
-
-      login(loggedInUser, session.token);
-      navigate(
-        session.user.role === "SUPER_ADMIN" ? "/platform-admin" : "/dashboard",
-        { replace: true }
-      );
+      login(session.user, session.token);
+      navigate(getAuthenticatedDestination(session.user), { replace: true });
     } catch (submitError) {
       setError(getErrorMessage(submitError, "Organization registration failed."));
     } finally {

@@ -2,10 +2,12 @@
 import os
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 
+from app.db.models import User
 from app.schemas.governance import GovernanceRequest
+from app.services.auth_service import get_current_user
 from app.services.governance_service import governance_service
 
 
@@ -20,11 +22,24 @@ BLOCKCHAIN_AUDIT_URL = os.getenv(
 )
 
 @router.post("/evaluate")
-async def evaluate_governance(request: GovernanceRequest):
+async def evaluate_governance(
+    request: GovernanceRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.is_platform_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant access is required for governance evaluation.",
+        )
+    if request.tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The requested tenant does not match the authenticated organization.",
+        )
 
     # 1. Evaluate governance using the existing engine
     result = governance_service.evaluate(
-        tenant_id=request.tenant_id,
+        tenant_id=current_user.tenant_id,
         features=request.features,
         prediction=request.prediction.model_dump(),
 
@@ -73,7 +88,7 @@ async def evaluate_governance(request: GovernanceRequest):
     # 3. Prepare audit record
     audit_payload = {
         "application_id": request.application_id,
-        "tenant_id": request.tenant_id,
+        "tenant_id": current_user.tenant_id,
         "event_type": "GOVERNANCE_EVALUATION",
 
         "ai_decision": request.prediction.label.upper(),

@@ -30,6 +30,7 @@ import {
   requestPlatformTenantInformation,
   type PlatformTenantVerificationDetails,
 } from "../services/platformAdminService";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 interface TenantListNavigationState {
   createdAt?: unknown;
@@ -41,16 +42,6 @@ interface TenantListNavigationState {
 function formatLabel(value: string): string {
   return value.replaceAll("_", " ").toLowerCase()
     .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatDate(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 function getErrorMessage(error: unknown): string {
@@ -329,7 +320,7 @@ export default function PlatformTenantDetails() {
                   {createdAt && (
                     <DetailField
                       label="Organization created"
-                      value={formatDate(createdAt)}
+                      value={formatIstTimestamp(createdAt)}
                       icon={CalendarDays}
                     />
                   )}
@@ -351,7 +342,7 @@ export default function PlatformTenantDetails() {
                   </div>
                   <DetailField
                     label="Last reviewed"
-                    value={formatDate(tenant.verification_reviewed_at)}
+                    value={formatIstTimestamp(tenant.verification_reviewed_at)}
                     icon={CalendarClock}
                   />
                   <DetailField

@@ -48,3 +48,5 @@ frontend/*-output.txt
 aegisai.backup-before-platform-admin.db
 
 aegisai.backup-before-platform-admin.db
+
+ai.backup-before-platform-admin.db

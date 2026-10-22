@@ -16,6 +16,7 @@ import { useAuth } from "../context/AuthContext";
 import { getErrorMessage } from "../services/errorMessage";
 import { getPlatformTenants } from "../services/platformAdminService";
 import type { PlatformTenant } from "../services/platformAdminService";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 type ReviewQueueStatus = "PENDING" | "UNDER_REVIEW" | "INFORMATION_REQUIRED";
 
@@ -30,16 +31,6 @@ function formatLabel(value: string): string {
     .replaceAll("_", " ")
     .toLowerCase()
     .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatDate(value: string | null): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 function statusTone(status: string): string {
@@ -232,8 +223,8 @@ export default function PlatformVerificationRequests() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredTenants.map((tenant) => {
-                const created = formatDate(tenant.created_at);
-                const reviewed = formatDate(tenant.verification_reviewed_at);
+                const created = formatIstTimestamp(tenant.created_at);
+                const reviewed = formatIstTimestamp(tenant.verification_reviewed_at);
                 return (
                   <tr key={tenant.id} className="align-middle transition-colors hover:bg-slate-50/70">
                     <td className="max-w-64 px-5 py-4">

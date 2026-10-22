@@ -9,13 +9,14 @@ from app.db.database import (
     migrate_sqlite_tenant_schema,
     migrate_sqlite_user_schema,
 )
-from app.db.models import PlatformAuditLog, Role, Tenant, User
+from app.db.models import PlatformAuditLog, Role, Tenant, User, utcnow
 from app.main import app
 from app.services.auth_service import (
     create_platform_admin_user,
     create_session_token,
     hash_password,
 )
+from test.tenant_approval_helpers import approve_tenant
 
 client = TestClient(app)
 
@@ -50,6 +51,8 @@ def _create_platform_admin(tenant_id: str | None = None) -> tuple[str, str]:
             full_name="Platform Admin",
             email=email,
             password="SecurePass123",
+            phone_number="+15555550100",
+            phone_verified_at=utcnow(),
             tenant_id=tenant_id,
         )
         session.commit()
@@ -70,6 +73,8 @@ def test_platform_admin_can_list_registered_tenants():
             full_name="Platform Admin",
             email=platform_email,
             password="SecurePass123",
+            phone_number="+15555550100",
+            phone_verified_at=utcnow(),
             tenant_id=tenants[0]["tenant"]["id"],
         )
         create_platform_admin_user(
@@ -77,6 +82,8 @@ def test_platform_admin_can_list_registered_tenants():
             full_name="Platform Admin Placeholder",
             email=placeholder_email,
             password="SecurePass123",
+            phone_number="+15555550101",
+            phone_verified_at=utcnow(),
         )
         session.commit()
         token = create_session_token(platform_admin, role_name="Super Admin")
@@ -265,6 +272,8 @@ def test_non_admin_tenant_user_cannot_list_global_tenants():
 def test_tenant_admin_scoped_endpoint_remains_tenant_scoped():
     tenant_a = _register_tenant("Scoped A")
     tenant_b = _register_tenant("Scoped B")
+    approve_tenant(client, tenant_a["tenant"]["id"])
+    approve_tenant(client, tenant_b["tenant"]["id"])
 
     response_a = client.get(
         "/api/v1/admin/users",
@@ -529,8 +538,15 @@ def test_deactivation_blocks_existing_and_new_tenant_sessions():
             "password": "SecurePass123",
         },
     )
-    assert blocked_existing_session.status_code == 403, blocked_existing_session.text
-    assert blocked_login.status_code == 403, blocked_login.text
+    assert blocked_existing_session.status_code == 200, blocked_existing_session.text
+    assert blocked_existing_session.json()["tenant_status"] == "inactive"
+    assert blocked_login.status_code == 200, blocked_login.text
+    assert blocked_login.json()["user"]["tenant_status"] == "inactive"
+    blocked_dashboard = client.get(
+        "/api/v1/admin/organization",
+        headers=_headers(blocked_login.json()["token"]),
+    )
+    assert blocked_dashboard.status_code == 403, blocked_dashboard.text
 
     session = SessionLocal()
     try:

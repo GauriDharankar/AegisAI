@@ -4,6 +4,7 @@ import { notifications } from "../data/mockData";
 import { useAuth } from "../context/AuthContext";
 import { getAuditLogs } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 export default function Notifications() {
   const { token, user } = useAuth();
@@ -60,7 +61,7 @@ export default function Notifications() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h2 className="font-semibold text-slate-900">{String(event.action).replaceAll("_", " ")}</h2>
-                  <time className="text-xs text-slate-400">{new Date(event.timestamp).toLocaleString()}</time>
+                  <time className="text-xs text-slate-400">{formatIstTimestamp(event.timestamp)}</time>
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
                   {event.actor_name ?? "System"} · {event.resource_type} · {event.resource_id}

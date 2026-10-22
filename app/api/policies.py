@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.db.models import AuditLog, Policy, PolicyVersion, Tenant, User, generate_id
 from app.schemas.policies import PolicyWriteRequest
 from app.services.auth_service import get_current_user
+from app.services.datetime_service import serialize_utc_datetime
 
 router = APIRouter(prefix="/api/v1/policies", tags=["Policies"])
 
@@ -42,8 +43,8 @@ def _serialize_policy(db: Session, policy: Policy) -> dict[str, Any]:
         "action": rule.get("action"),
         "severity": rule.get("severity"),
         "version_number": version.version_number if version is not None else None,
-        "created_at": policy.created_at.isoformat(),
-        "updated_at": policy.updated_at.isoformat(),
+        "created_at": serialize_utc_datetime(policy.created_at),
+        "updated_at": serialize_utc_datetime(policy.updated_at),
     }
 
 

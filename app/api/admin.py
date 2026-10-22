@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.schemas.governance import AutoApproveConfig, RiskRoutingConfig
 from app.services.auth_service import get_current_user, hash_password, normalize_email, validate_password
+from app.services.datetime_service import serialize_utc_datetime
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Tenant Admin"])
 
@@ -238,7 +239,7 @@ def _serialize_user(user: User, db: Session) -> dict[str, Any]:
         "primary_role": primary_role.name if primary_role else "Operations Reviewer",
         "responsibilities": responsibilities,
         "teams": team_entries,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": serialize_utc_datetime(user.created_at),
     }
 
 
@@ -370,8 +371,8 @@ def _serialize_workflow_stage(stage: WorkflowStage) -> dict[str, Any]:
         "stage_order": stage.stage_order,
         "team_id": stage.team_id,
         "team_name": stage.team.name if stage.team else None,
-        "created_at": stage.created_at.isoformat(),
-        "updated_at": stage.updated_at.isoformat(),
+        "created_at": serialize_utc_datetime(stage.created_at),
+        "updated_at": serialize_utc_datetime(stage.updated_at),
     }
 
 
@@ -382,8 +383,8 @@ def _serialize_workflow(workflow: GovernanceWorkflow) -> dict[str, Any]:
         "tenant_id": workflow.tenant_id,
         "name": workflow.name,
         "status": workflow.status,
-        "created_at": workflow.created_at.isoformat(),
-        "updated_at": workflow.updated_at.isoformat(),
+        "created_at": serialize_utc_datetime(workflow.created_at),
+        "updated_at": serialize_utc_datetime(workflow.updated_at),
         "stages": [_serialize_workflow_stage(stage) for stage in ordered],
     }
 
@@ -492,8 +493,8 @@ def get_organization(
         "id": tenant.id,
         "organization_name": tenant.organization_name,
         "status": tenant.status,
-        "created_at": tenant.created_at.isoformat(),
-        "updated_at": tenant.updated_at.isoformat(),
+        "created_at": serialize_utc_datetime(tenant.created_at),
+        "updated_at": serialize_utc_datetime(tenant.updated_at),
         "user_count": len(users),
         "team_count": len(teams),
         "active_users": sum(1 for user in users if user.status == "active"),
@@ -647,7 +648,7 @@ def update_organization(
         "id": tenant.id,
         "organization_name": tenant.organization_name,
         "status": tenant.status,
-        "created_at": tenant.created_at.isoformat(),
+        "created_at": serialize_utc_datetime(tenant.created_at),
     }
 
 
@@ -976,7 +977,7 @@ def list_audit_logs(
             "action": log.action,
             "resource_type": log.resource_type,
             "resource_id": log.resource_id,
-            "timestamp": log.timestamp.isoformat(),
+            "timestamp": serialize_utc_datetime(log.timestamp),
             "metadata": log.metadata_data or {},
         }
         for log in logs

@@ -11,6 +11,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getApplications, getAuditLogs, getOrganization, getTeams, getUsers, getWorkflow } from "../services/adminService";
 import { getErrorMessage } from "../services/errorMessage";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 interface WorkflowStageSummary {
   id?: string;
@@ -199,7 +200,7 @@ export default function AdminDashboard() {
                   {recentActivity.slice(0, 5).map((entry) => (
                     <Link key={entry.id} to="/admin/audit" className="tenant-activity-row flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3.5 py-3 hover:border-teal-200">
                       <span className="min-w-0 truncate">{entry.action.replaceAll("_", " ")}</span>
-                      <span className="shrink-0 text-right text-xs text-slate-500">{new Date(entry.timestamp).toLocaleDateString()}</span>
+                      <span className="shrink-0 text-right text-xs text-slate-500">{formatIstTimestamp(entry.timestamp)}</span>
                     </Link>
                   ))}
                 </div>

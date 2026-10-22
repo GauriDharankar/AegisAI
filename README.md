@@ -91,19 +91,70 @@ intended database, run from the repository root in PowerShell:
 $env:AEGISAI_ENV = "development"
 $env:AEGISAI_ALLOW_LOCAL_PLATFORM_ADMIN_PROVISIONING = "I_ACKNOWLEDGE_LOCAL_DEVELOPMENT_ONLY"
 $env:AEGISAI_DB_PATH = (Resolve-Path ".\aegisai.db").Path
+$env:AEGISAI_PHONE_ENCRYPTION_KEY = (& .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())").Trim()
+$env:AEGISAI_SMS_PROVIDER = "twilio"
+$env:AEGISAI_TWILIO_ACCOUNT_SID = "<Twilio account SID>"
+$env:AEGISAI_TWILIO_AUTH_TOKEN = "<Twilio auth token>"
+$env:AEGISAI_TWILIO_FROM_NUMBER = "+15555550100"
 .\.venv\Scripts\python.exe -m app.provision_platform_admin
 ```
 
-The CLI prompts for the maintainer name, account email, and password (hidden
-input); it never accepts the password as a command-line argument. User,
-platform-admin marker, and an audit event with a null authenticated actor are
-written in one transaction. The event identifies the local CLI and local
-operator account, not an authenticated application user. Clear the opt-in
-environment variable after the command exits:
+The CLI sends an OTP to the supplied E.164 mobile number and requires the
+operator to verify it before account creation. It then prompts for the
+maintainer name, account email, and password (hidden input); it never accepts
+the password as a command-line argument. The phone number is stored encrypted
+and indexed by a keyed digest. The user, platform-admin marker, and audit event
+are written in one transaction. To securely enroll or replace the verified
+number on an existing account that lacks one, run
+`python -m app.provision_platform_admin --enroll-phone` with the separate
+`AEGISAI_ALLOW_PLATFORM_ADMIN_PHONE_ENROLLMENT=I_ACKNOWLEDGE_PRIVILEGED_ACCOUNT_PHONE_UPDATE`
+opt-in, the absolute database path, and exact path confirmation. This
+administrative procedure can run against the configured production database
+and requires successful SMS verification of the new number; it revokes that
+account's sessions.
+
+```powershell
+$env:AEGISAI_ENV = "production"
+$env:AEGISAI_ALLOW_PLATFORM_ADMIN_PHONE_ENROLLMENT = "I_ACKNOWLEDGE_PRIVILEGED_ACCOUNT_PHONE_UPDATE"
+$env:AEGISAI_DB_PATH = (Resolve-Path ".\aegisai.db").Path
+$env:AEGISAI_PHONE_ENCRYPTION_KEY = "<the configured production Fernet key>"
+$env:AEGISAI_SMS_PROVIDER = "twilio"
+$env:AEGISAI_TWILIO_ACCOUNT_SID = "<Twilio account SID>"
+$env:AEGISAI_TWILIO_AUTH_TOKEN = "<Twilio auth token>"
+$env:AEGISAI_TWILIO_FROM_NUMBER = "+15555550100"
+.\.venv\Scripts\python.exe -m app.provision_platform_admin --enroll-phone
+Remove-Item Env:AEGISAI_ALLOW_PLATFORM_ADMIN_PHONE_ENROLLMENT
+```
+There is no public Super Admin registration or phone-update route.
+
+For production SMS delivery set `AEGISAI_ENV=production`,
+`AEGISAI_SMS_PROVIDER=twilio`, and the three Twilio variables above in the
+server's secret manager. No provider is bundled as a successful fallback:
+missing or failed delivery blocks recovery and reports an error. The test-only
+provider requires both `AEGISAI_ENV=development` and
+`AEGISAI_ENABLE_TEST_OTP=true`; it returns a clearly labeled test code and is
+refused when any production environment marker is set. Never enable it in a
+deployed environment.
+
+Set `AEGISAI_PHONE_ENCRYPTION_KEY` to a securely generated Fernet key on every
+application instance before provisioning or phone recovery. Generate one with
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+and keep a protected backup; do not generate a fresh key each time you start
+the server or run enrollment. Use the same key for the server and CLI. Losing
+or rotating this key without re-encrypting the records makes enrolled numbers unavailable. Also configure a random,
+high-entropy `AEGISAI_AUTH_SECRET` of at least 32 bytes for signed sessions
+(for example, `python -c "import secrets; print(secrets.token_urlsafe(48))"`).
+Production startup refuses the development signing-secret fallback. Clear development
+provisioning opt-in variables after each administrative command:
 
 ```powershell
 Remove-Item Env:AEGISAI_ALLOW_LOCAL_PLATFORM_ADMIN_PROVISIONING
 ```
+
+Platform Super Admins sign in at `/platform-admin/login`; tenant sign-in and
+organization registration remain at `/login` and `/register`. Password
+recovery sends a one-time code only to the verified number already on the
+account. Password changes and recovery revoke existing signed sessions.
 
 ## 🏗️ System Architecture
 

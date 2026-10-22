@@ -3,6 +3,7 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.main import app
+from test.tenant_approval_helpers import approve_tenant
 
 client = TestClient(app)
 
@@ -27,6 +28,7 @@ def _register_admin():
         },
     )
     assert register_response.status_code == 200, register_response.text
+    approve_tenant(client, register_response.json()["tenant"]["id"])
     token = register_response.json()["token"]
     return token, org_name
 

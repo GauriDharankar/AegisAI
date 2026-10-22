@@ -15,6 +15,7 @@ import {
   updateUserStatus,
 } from "../services/adminService";
 import { useToast } from "../components/ToastProvider";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 const RESPONSIBILITY_OPTIONS = [
   "TENANT_ADMIN",
@@ -340,7 +341,7 @@ export default function AdminUsers() {
                         ) : (
                           <div>
                           <p className="font-medium text-slate-800">{user.name}</p>
-                          <p className="text-xs text-slate-500">{user.created_at ? new Date(user.created_at).toLocaleDateString() : "New user"}</p>
+                          <p className="text-xs text-slate-500">{formatIstTimestamp(user.created_at, "New user")}</p>
                           </div>
                         )}
                       </td>

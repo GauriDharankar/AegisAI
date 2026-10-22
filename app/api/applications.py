@@ -11,8 +11,10 @@ from app.db.database import get_db
 from app.db.models import Application, AuditLog, GovernanceWorkflow, Policy, PolicyVersion, Team, Tenant, User, WorkflowStage
 from app.services.auth_service import get_current_user
 from app.services.configuration_service import get_tenant_governance_configuration
+from app.services.datetime_service import serialize_utc_datetime
 from app.services.financial_service import calculate_debt_to_income
 from app.services.governance_service import governance_service
+from app.services.hunter_service import hunter_service
 from app.services.model_service import loan_model
 
 router = APIRouter(prefix="/api/v1", tags=["Applications"])
@@ -137,8 +139,8 @@ def _serialize_application(application: Application) -> dict[str, Any]:
         "current_workflow_stage_id": None if is_risk_based else application.current_workflow_stage_id,
         "assigned_team_id": application.assigned_team_id,
         "assigned_team_name": application.assigned_team.name if application.assigned_team else None,
-        "created_at": application.created_at.isoformat(),
-        "updated_at": application.updated_at.isoformat(),
+        "created_at": serialize_utc_datetime(application.created_at),
+        "updated_at": serialize_utc_datetime(application.updated_at),
     }
 
 
@@ -466,6 +468,7 @@ def create_application(
             "governance_route": route,
         },
     )
+    hunter_service.check_application(db, application, actor_user_id=current_user.id, commit=False)
     db.commit()
     db.refresh(application)
     return _serialize_application(application)

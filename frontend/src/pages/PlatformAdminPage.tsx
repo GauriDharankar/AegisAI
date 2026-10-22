@@ -17,6 +17,7 @@ import { useAuth } from "../context/AuthContext";
 import { getErrorMessage } from "../services/errorMessage";
 import { getPlatformTenants } from "../services/platformAdminService";
 import type { PlatformTenant } from "../services/platformAdminService";
+import { formatIstTimestamp } from "../utils/dateTime";
 
 import PlatformAdminActivity from "./PlatformAdminActivity";
 import PlatformVerificationRequests from "./PlatformVerificationRequests";
@@ -60,18 +61,6 @@ const overviewLinks = [
     icon: Clock3,
   },
 ];
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
-}
 
 function formatStatus(value: string): string {
   return value
@@ -320,7 +309,7 @@ function PlatformOverview() {
                         {formatStatus(tenant.verification_status)}
                       </span>
                       <span className="hidden w-20 text-right text-xs text-slate-500 sm:inline">
-                        {formatDate(tenant.created_at)}
+                        {formatIstTimestamp(tenant.created_at)}
                       </span>
                     </span>
                   </Link>

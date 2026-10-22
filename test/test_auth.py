@@ -1,3 +1,4 @@
+import importlib
 import uuid
 
 import pytest
@@ -5,11 +6,32 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.db.database import SessionLocal
-from app.db.models import User
+from app.db.models import User, utcnow
 from app.main import app
 from app.services.auth_service import create_platform_admin_user, require_platform_admin
 
 client = TestClient(app)
+
+
+def test_auth_secret_fallback_requires_explicit_development(monkeypatch):
+    from app.services import auth_service
+
+    environment_names = ("AEGISAI_ENV", "APP_ENV", "ENVIRONMENT", "NODE_ENV")
+    try:
+        with monkeypatch.context() as environment:
+            environment.delenv("AEGISAI_AUTH_SECRET", raising=False)
+            for name in environment_names:
+                environment.delenv(name, raising=False)
+
+            with pytest.raises(RuntimeError, match="explicitly select a development environment"):
+                importlib.reload(auth_service)
+
+            environment.setenv("AEGISAI_ENV", "development")
+            environment.setenv("NODE_ENV", "production")
+            with pytest.raises(RuntimeError, match="at least 32 bytes in production"):
+                importlib.reload(auth_service)
+    finally:
+        importlib.reload(auth_service)
 
 
 def _unique_org_name(prefix: str = "Auth Org") -> str:
@@ -132,6 +154,8 @@ def test_platform_admin_has_explicit_super_admin_authorization():
             full_name="Platform Admin",
             email=email,
             password="SecurePass123",
+            phone_number="+15555550100",
+            phone_verified_at=utcnow(),
         )
 
         assert user.is_platform_admin is True
